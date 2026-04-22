@@ -1,0 +1,110 @@
+name: Codex Full Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      title_suffix:
+        description: 'Sufixo opcional pro título da issue (ex: "v0.1 shipping check")'
+        required: false
+        default: ''
+
+jobs:
+  codex-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Run Codex Audit
+        id: run_codex
+        uses: openai/codex-action@c25d10f3f498316d4b2496cc4c6dd58057a7b031 # v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_REVIEW_KEY }}
+          prompt-file: .github/codex/prompts/audit.md
+          output-schema-file: .github/codex/schemas/review-schema.json
+          output-file: codex-audit.json
+          safety-strategy: drop-sudo
+          sandbox: read-only
+          model: gpt-5.3-codex
+
+  post-audit:
+    runs-on: ubuntu-latest
+    needs: codex-audit
+    if: needs.codex-audit.outputs.final_message != ''
+    permissions:
+      issues: write
+    steps:
+      - name: Create audit issue
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const raw = process.env.CODEX_MESSAGE;
+            const suffix = process.env.TITLE_SUFFIX || '';
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `Codex audit — ${today}${suffix ? ' · ' + suffix : ''}`;
+
+            let body;
+            try {
+              const data = JSON.parse(raw);
+              const priorityLabel = { 0: 'INFO', 1: 'HIGH', 2: 'MEDIUM', 3: 'LOW' };
+              const priorityIcon = { 0: 'ℹ️', 1: '🔴', 2: '🟡', 3: '🟢' };
+              const correctIcon = data.overall_correctness === 'patch is correct' ? '✅' : '⚠️';
+
+              let md = `## Codex Full Audit\n\n`;
+              md += `${correctIcon} **${data.overall_correctness}** (confidence: ${Math.round(data.overall_confidence_score * 100)}%)\n\n`;
+              md += `${data.overall_explanation}\n\n`;
+
+              if (data.findings.length > 0) {
+                const counts = { 1: 0, 2: 0, 3: 0, 0: 0 };
+                for (const f of data.findings) counts[f.priority] = (counts[f.priority] || 0) + 1;
+                md += `**Findings:** 🔴 ${counts[1] || 0} HIGH · 🟡 ${counts[2] || 0} MEDIUM · 🟢 ${counts[3] || 0} LOW · ℹ️ ${counts[0] || 0} INFO\n\n`;
+                md += `---\n\n`;
+                for (const f of data.findings) {
+                  const icon = priorityIcon[f.priority] || '⚪';
+                  const label = priorityLabel[f.priority] || 'UNKNOWN';
+                  const loc = f.code_location;
+                  const file = loc?.filepath?.replace(/.*\/pisper\//, '') || '';
+                  const lines = loc?.line_range ? `L${loc.line_range.start}-${loc.line_range.end}` : '';
+                  const where = file ? `\`${file}${lines ? ':' + lines : ''}\`` : '';
+
+                  md += `### ${icon} [${label}] ${f.title}\n`;
+                  if (where) md += `📍 ${where}\n\n`;
+                  md += `${f.body}\n\n`;
+                }
+              } else {
+                md += `\n✨ Nenhum problema encontrado.\n`;
+              }
+
+              body = md;
+            } catch {
+              body = `## Codex Full Audit\n\n${raw}`;
+            }
+
+            const labels = ['audit'];
+            try {
+              await github.rest.issues.getLabel({ owner: context.repo.owner, repo: context.repo.repo, name: 'audit' });
+            } catch {
+              await github.rest.issues.createLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: 'audit',
+                color: '5319e7',
+                description: 'Findings from Codex audit runs',
+              }).catch(() => {});
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title,
+              body,
+              labels,
+            });
+        env:
+          CODEX_MESSAGE: ${{ needs.codex-audit.outputs.final_message }}
+          TITLE_SUFFIX: ${{ inputs.title_suffix }}
