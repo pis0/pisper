@@ -5,7 +5,7 @@ local M = {}
 
 -- keyCode do Right Option (0x3D = 61). Outros úteis:
 --   Right Command: 54 | Right Shift: 60 | Right Control: 62 | Fn: 63
---   F19: 80 (teclados com bloco numérico)
+-- Só teclas modifier funcionam — flagsChanged não dispara em keys regulares (F13–F19 etc).
 local DEFAULT_KEYCODE = 61
 local DEFAULT_MIN_DURATION = 0.25 -- segundos; clicks rápidos são cancelados
 
