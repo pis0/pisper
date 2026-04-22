@@ -1,0 +1,6 @@
+.DS_Store
+*.wav
+*.log
+.env
+.env.local
+/tmp/

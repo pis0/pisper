@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# pisper-cancel: aborta gravação em andamento sem transcrever (click muito curto).
+set -euo pipefail
+
+PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+PID_FILE="$PISPER_TMP/ffmpeg.pid"
+AUDIO_FILE="$PISPER_TMP/recording.wav"
+
+if [[ -f "$PID_FILE" ]]; then
+  pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+  rm -f "$PID_FILE"
+fi
+
+rm -f "$AUDIO_FILE"
