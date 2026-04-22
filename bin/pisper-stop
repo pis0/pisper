@@ -25,6 +25,7 @@ MODEL="${PISPER_MODEL:-gpt-4o-transcribe}"
 log_err() { echo "[pisper] $*" >&2; }
 
 cleanup() { rm -f "$AUDIO_FILE" "$TRIMMED"; }
+trap cleanup EXIT
 
 if [[ -f "$PID_FILE" ]]; then
   pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
@@ -37,18 +38,25 @@ if [[ -f "$PID_FILE" ]]; then
     done
     if kill -0 "$pid" 2>/dev/null; then
       kill -TERM "$pid" 2>/dev/null || true
-      # Aguarda o TERM efetivamente fechar o wav antes de prosseguir.
       for _ in 1 2 3 4 5 6 7 8 9 10; do
         kill -0 "$pid" 2>/dev/null || break
         sleep 0.05
       done
+    fi
+    # Último recurso: SIGKILL. Nunca transcrever wav enquanto ffmpeg pode estar escrevendo.
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -KILL "$pid" 2>/dev/null || true
+      sleep 0.1
+    fi
+    if kill -0 "$pid" 2>/dev/null; then
+      log_err "ffmpeg refused to exit (pid $pid) — aborting transcription"
+      exit 1
     fi
   fi
 fi
 
 if [[ ! -s "$AUDIO_FILE" ]]; then
   log_err "no audio recorded (empty file)"
-  cleanup
   exit 1
 fi
 
@@ -65,7 +73,6 @@ cp "$AUDIO_FILE" "$PISPER_TMP/last.wav" 2>/dev/null || true
 
 if [[ ! -f "$ENV_FILE" ]]; then
   log_err "env not found: $ENV_FILE (see .env.example)"
-  cleanup
   exit 1
 fi
 
@@ -74,7 +81,6 @@ set -a; source "$ENV_FILE"; set +a
 
 if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   log_err "OPENAI_API_KEY not set in $ENV_FILE"
-  cleanup
   exit 1
 fi
 
@@ -85,20 +91,20 @@ response=$(curl -sS --fail-with-body --max-time 60 \
   -F "file=@$AUDIO_FILE" \
   -F "response_format=json" 2>&1) || {
   log_err "API request failed"
-  cleanup
   exit 1
 }
 
-text=$(printf '%s' "$response" | jq -r '.text // empty')
+if ! text=$(printf '%s' "$response" | jq -r '.text // empty' 2>/dev/null); then
+  log_err "failed to parse API response"
+  exit 1
+fi
 
 if [[ -z "$text" ]]; then
   log_err "empty transcription"
-  cleanup
   exit 1
 fi
 
 printf '%s' "$text" | pbcopy
 osascript -e 'tell application "System Events" to keystroke "v" using command down'
 
-cleanup
 printf '%s\n' "$text"

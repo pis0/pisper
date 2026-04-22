@@ -66,14 +66,14 @@ marker_end="-- pisper: END (auto)"
 if grep -q "$marker_begin" "$HS_INIT" 2>/dev/null; then
   ok "pisper already registered in $HS_INIT"
 else
-  # Usa long bracket [=[...]=] pra string Lua — não interpreta aspas/escapes no path.
+  # Usa long bracket [===[...]===] pra string Lua — não interpreta aspas/escapes no path.
   {
     echo ""
     echo "$marker_begin"
-    echo "package.path = package.path .. [=[;$PISPER_DIR/hammerspoon/?.lua]=]"
+    echo "package.path = package.path .. [===[;$PISPER_DIR/hammerspoon/?.lua]===]"
     echo "local pisper = require('pisper')"
     echo "pisper.init({"
-    echo "  binPath = [=[$PISPER_DIR/bin]=],"
+    echo "  binPath = [===[$PISPER_DIR/bin]===],"
     echo "  -- default keyCode: 61 (Right Option). See pisper.lua for other options."
     echo "})"
     echo "$marker_end"
