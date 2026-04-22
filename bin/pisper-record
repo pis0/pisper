@@ -3,7 +3,12 @@
 # Chamado pelo Hammerspoon on keyDown do atalho configurado.
 set -euo pipefail
 
-PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+# Hammerspoon spawna shell não-interativo — PATH mínimo sem brew.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+PISPER_TMP="/tmp/pisper"
 mkdir -p "$PISPER_TMP"
 
 AUDIO_FILE="$PISPER_TMP/recording.wav"

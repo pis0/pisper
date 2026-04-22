@@ -2,7 +2,9 @@
 # pisper-cancel: aborta gravação em andamento sem transcrever (click muito curto).
 set -euo pipefail
 
-PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
+
+PISPER_TMP="/tmp/pisper"
 PID_FILE="$PISPER_TMP/ffmpeg.pid"
 AUDIO_FILE="$PISPER_TMP/recording.wav"
 

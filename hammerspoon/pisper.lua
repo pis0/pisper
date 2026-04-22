@@ -51,7 +51,6 @@ function M.stopRecording()
   recordingStartedAt = nil
 
   if elapsed < M.minDuration then
-    -- clique muito curto: cancela silenciosamente
     runAsync(M.binPath .. "/pisper-cancel", nil, nil)
     return
   end
@@ -72,15 +71,17 @@ function M.init(opts)
   M.keyCode = opts.keyCode or DEFAULT_KEYCODE
   M.minDuration = opts.minDuration or DEFAULT_MIN_DURATION
 
+  -- permite reload via osascript/CLI (útil pra dev loop)
+  hs.allowAppleScript(true)
+
   -- Detecta hold do modifier via flagsChanged. O keyCode identifica a tecla
   -- específica que mudou de estado (ex: Right Option, não qualquer Option).
   M.tap = hs.eventtap.new({ hs.eventtap.event.types.flagsChanged }, function(event)
     if event:getKeyCode() ~= M.keyCode then return false end
 
     local flags = event:getFlags()
-    local isDown = flags.alt == true -- funciona pra Right/Left Option, Shift, etc.
+    local isDown = flags.alt == true
 
-    -- mapeia flag conforme o modifier escolhido
     if M.keyCode == 54 or M.keyCode == 55 then isDown = flags.cmd == true end
     if M.keyCode == 60 or M.keyCode == 56 then isDown = flags.shift == true end
     if M.keyCode == 62 or M.keyCode == 59 then isDown = flags.ctrl == true end

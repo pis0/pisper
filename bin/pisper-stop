@@ -3,7 +3,14 @@
 # Chamado pelo Hammerspoon on keyUp do atalho configurado.
 set -euo pipefail
 
-PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+# Hammerspoon spawna shell não-interativo — PATH mínimo sem brew.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
+
+# Força UTF-8 — sem isso, pbcopy interpreta bytes UTF-8 como MacRoman e corrompe acentos.
+export LANG="en_US.UTF-8"
+export LC_ALL="en_US.UTF-8"
+
+PISPER_TMP="/tmp/pisper"
 AUDIO_FILE="$PISPER_TMP/recording.wav"
 PID_FILE="$PISPER_TMP/ffmpeg.pid"
 ENV_FILE="${PISPER_ENV_FILE:-$HOME/.config/pisper/env}"
