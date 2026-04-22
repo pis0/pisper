@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pisper install: integra o módulo ao Hammerspoon e cria config do usuário.
+# pisper install: wires the Lua module into Hammerspoon and sets up user config.
 set -euo pipefail
 
 PISPER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,12 +20,12 @@ warn(){ printf '%b!%b %s\n' "$yellow" "$reset" "$*"; }
 err() { printf '%b✗%b %s\n' "$red" "$reset" "$*" >&2; }
 
 say "${bold}pisper install${reset}"
-say "  projeto: $PISPER_DIR"
+say "  project: $PISPER_DIR"
 
-# 1. deps básicas
+# 1. base deps
 for cmd in ffmpeg jq pbcopy osascript; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
-    err "$cmd não encontrado no PATH"
+    err "$cmd not found in PATH"
     case "$cmd" in
       ffmpeg) echo "  → brew install ffmpeg" ;;
       jq)     echo "  → brew install jq" ;;
@@ -33,28 +33,28 @@ for cmd in ffmpeg jq pbcopy osascript; do
     exit 1
   fi
 done
-ok "dependências de shell ok (ffmpeg, jq, pbcopy, osascript)"
+ok "shell deps ok (ffmpeg, jq, pbcopy, osascript)"
 
-# 2. Hammerspoon instalado
+# 2. Hammerspoon installed
 if ! [[ -d "/Applications/Hammerspoon.app" ]]; then
-  err "Hammerspoon não encontrado em /Applications"
+  err "Hammerspoon not found in /Applications"
   echo "  → brew install --cask hammerspoon"
   exit 1
 fi
-ok "Hammerspoon instalado"
+ok "Hammerspoon installed"
 
-# 3. config do usuário
+# 3. user config
 mkdir -p "$CONFIG_DIR"
 if [[ ! -f "$CONFIG_ENV" ]]; then
   cp "$PISPER_DIR/.env.example" "$CONFIG_ENV"
   chmod 600 "$CONFIG_ENV"
-  warn "config criado em $CONFIG_ENV"
-  warn "edite e coloque sua OPENAI_API_KEY antes de usar"
+  warn "config created at $CONFIG_ENV"
+  warn "edit it and set your OPENAI_API_KEY before use"
 else
-  ok "config existe em $CONFIG_ENV"
+  ok "config exists at $CONFIG_ENV"
 fi
 
-# 4. integração com Hammerspoon init.lua
+# 4. hook into Hammerspoon init.lua
 mkdir -p "$HS_DIR"
 touch "$HS_INIT"
 
@@ -62,7 +62,7 @@ marker_begin="-- pisper: BEGIN (auto)"
 marker_end="-- pisper: END (auto)"
 
 if grep -q "$marker_begin" "$HS_INIT" 2>/dev/null; then
-  ok "pisper já registrado em $HS_INIT"
+  ok "pisper already registered in $HS_INIT"
 else
   {
     echo ""
@@ -71,26 +71,26 @@ else
     echo "local pisper = require('pisper')"
     echo "pisper.init({"
     echo "  binPath = '$PISPER_DIR/bin',"
-    echo "  -- keyCode padrão: 61 (Right Option). Veja pisper.lua para outras opções."
+    echo "  -- default keyCode: 61 (Right Option). See pisper.lua for other options."
     echo "})"
     echo "$marker_end"
   } >> "$HS_INIT"
-  ok "adicionado ao $HS_INIT"
+  ok "added to $HS_INIT"
 fi
 
-# 5. recarrega Hammerspoon se estiver rodando
+# 5. reload Hammerspoon if it's running
 if pgrep -qx Hammerspoon; then
   osascript -e 'tell application "Hammerspoon" to execute lua code "hs.reload()"' \
-    >/dev/null 2>&1 && ok "Hammerspoon recarregado" \
-    || warn "Hammerspoon está rodando mas não respondeu — recarregue manualmente"
+    >/dev/null 2>&1 && ok "Hammerspoon reloaded" \
+    || warn "Hammerspoon is running but didn't respond — reload it manually"
 else
-  warn "Hammerspoon não está rodando — abra ele pra ativar o pisper"
+  warn "Hammerspoon is not running — launch it to activate pisper"
   say  "  → open -a Hammerspoon"
 fi
 
 say ""
-say "${bold}próximos passos${reset}"
-say "  1. edite $CONFIG_ENV e preencha OPENAI_API_KEY"
-say "  2. abra Hammerspoon (se ainda não está rodando): open -a Hammerspoon"
-say "  3. conceda permissões: Accessibility + Microphone + Input Monitoring"
-say "  4. teste: segure ${bold}Right Option${reset}, fale, solte — o texto aparece no foco"
+say "${bold}next steps${reset}"
+say "  1. edit $CONFIG_ENV and set OPENAI_API_KEY"
+say "  2. launch Hammerspoon (if not running): open -a Hammerspoon"
+say "  3. grant permissions: Accessibility + Microphone + Input Monitoring"
+say "  4. test: hold ${bold}Right Option${reset}, speak, release — text is pasted at the cursor"

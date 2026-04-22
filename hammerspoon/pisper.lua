@@ -38,7 +38,7 @@ function M.startRecording()
   alert("🎤 pisper", 0.4)
   runAsync(M.binPath .. "/pisper-record", nil, function(exitCode, _, stderr)
     if exitCode ~= 0 then
-      hs.alert.show("pisper: erro ao iniciar\n" .. stderr, 2)
+      hs.alert.show("pisper: failed to start\n" .. stderr, 2)
     end
   end)
 end
@@ -55,19 +55,19 @@ function M.stopRecording()
     return
   end
 
-  alert("⏳ transcrevendo…", 0.5)
+  alert("⏳ transcribing…", 0.5)
   runAsync(M.binPath .. "/pisper-stop", nil, function(exitCode, stdout, stderr)
     if exitCode == 0 then
       alert("✅", 0.3)
     else
-      hs.alert.show("pisper: falha\n" .. (stderr ~= "" and stderr or stdout), 3)
+      hs.alert.show("pisper: failed\n" .. (stderr ~= "" and stderr or stdout), 3)
     end
   end)
 end
 
 function M.init(opts)
   opts = opts or {}
-  M.binPath = assert(opts.binPath, "pisper.init: binPath obrigatório")
+  M.binPath = assert(opts.binPath, "pisper.init: binPath required")
   M.keyCode = opts.keyCode or DEFAULT_KEYCODE
   M.minDuration = opts.minDuration or DEFAULT_MIN_DURATION
 
@@ -96,7 +96,7 @@ function M.init(opts)
   end)
 
   M.tap:start()
-  print("[pisper] ativo — hold keyCode " .. M.keyCode .. " pra gravar")
+  print("[pisper] active — hold keyCode " .. M.keyCode .. " to record")
   return M
 end
 
