@@ -73,7 +73,8 @@ KeyCodes comuns:
 | Right Shift | 60 |
 | Right Control | 62 |
 | Fn (globo) | 63 |
-| F19 | 80 |
+
+> O pisper detecta hold via `flagsChanged` (modifier keys). Teclas regulares tipo F13–F19 não emitem esse evento e não funcionam aqui por design.
 
 Descobrir keyCode de qualquer tecla: abra o console do Hammerspoon e rode:
 ```lua
