@@ -2,6 +2,7 @@
 # pisper-stop: encerra gravação, transcreve via OpenAI Whisper, cola no app em foco.
 # Chamado pelo Hammerspoon on keyUp do atalho configurado.
 set -euo pipefail
+umask 077
 
 # Hammerspoon spawna shell não-interativo — PATH mínimo sem brew.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
@@ -10,7 +11,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
-PISPER_TMP="/tmp/pisper"
+PISPER_TMP="${TMPDIR:-/tmp}/pisper"
 AUDIO_FILE="$PISPER_TMP/recording.wav"
 PID_FILE="$PISPER_TMP/ffmpeg.pid"
 ENV_FILE="${PISPER_ENV_FILE:-$HOME/.config/pisper/env}"
@@ -20,7 +21,10 @@ log_err() { echo "[pisper] $*" >&2; }
 
 if [[ -f "$PID_FILE" ]]; then
   pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+  # Remove o PID file antes de operar — impede que um novo record corra com PID antigo.
+  rm -f "$PID_FILE"
+  # Só sinaliza se o processo ainda é ffmpeg (PID reciclado mata processo alheio).
+  if [[ -n "$pid" ]] && [[ "$(ps -p "$pid" -o comm= 2>/dev/null)" == *ffmpeg* ]]; then
     kill -INT "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       kill -0 "$pid" 2>/dev/null || break
@@ -28,7 +32,6 @@ if [[ -f "$PID_FILE" ]]; then
     done
     kill -0 "$pid" 2>/dev/null && kill -TERM "$pid" 2>/dev/null || true
   fi
-  rm -f "$PID_FILE"
 fi
 
 if [[ ! -s "$AUDIO_FILE" ]]; then

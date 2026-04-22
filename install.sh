@@ -45,14 +45,16 @@ ok "Hammerspoon installed"
 
 # 3. user config
 mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR"
 if [[ ! -f "$CONFIG_ENV" ]]; then
   cp "$PISPER_DIR/.env.example" "$CONFIG_ENV"
-  chmod 600 "$CONFIG_ENV"
   warn "config created at $CONFIG_ENV"
   warn "edit it and set your OPENAI_API_KEY before use"
 else
   ok "config exists at $CONFIG_ENV"
 fi
+# Sempre reforça chmod — se o arquivo existia com permissão aberta, a key estava exposta.
+chmod 600 "$CONFIG_ENV"
 
 # 4. hook into Hammerspoon init.lua
 mkdir -p "$HS_DIR"
@@ -64,13 +66,14 @@ marker_end="-- pisper: END (auto)"
 if grep -q "$marker_begin" "$HS_INIT" 2>/dev/null; then
   ok "pisper already registered in $HS_INIT"
 else
+  # Usa long bracket [=[...]=] pra string Lua — não interpreta aspas/escapes no path.
   {
     echo ""
     echo "$marker_begin"
-    echo "package.path = package.path .. ';$PISPER_DIR/hammerspoon/?.lua'"
+    echo "package.path = package.path .. [=[;$PISPER_DIR/hammerspoon/?.lua]=]"
     echo "local pisper = require('pisper')"
     echo "pisper.init({"
-    echo "  binPath = '$PISPER_DIR/bin',"
+    echo "  binPath = [=[$PISPER_DIR/bin]=],"
     echo "  -- default keyCode: 61 (Right Option). See pisper.lua for other options."
     echo "})"
     echo "$marker_end"

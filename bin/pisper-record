@@ -2,14 +2,16 @@
 # pisper-record: inicia gravação do mic em background via ffmpeg/AVFoundation.
 # Chamado pelo Hammerspoon on keyDown do atalho configurado.
 set -euo pipefail
+umask 077
 
 # Hammerspoon spawna shell não-interativo — PATH mínimo sem brew.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
-PISPER_TMP="/tmp/pisper"
-mkdir -p "$PISPER_TMP"
+# $TMPDIR no macOS já é per-user (/var/folders/.../T/) — evita exposição em /tmp compartilhado.
+PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+mkdir -m 700 -p "$PISPER_TMP"
 
 AUDIO_FILE="$PISPER_TMP/recording.wav"
 PID_FILE="$PISPER_TMP/ffmpeg.pid"
@@ -17,11 +19,12 @@ LOG_FILE="$PISPER_TMP/record.log"
 
 if [[ -f "$PID_FILE" ]]; then
   old_pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+  rm -f "$PID_FILE"
+  # Só mata se o processo ainda é ffmpeg — PID pode ter sido reciclado.
+  if [[ -n "$old_pid" ]] && [[ "$(ps -p "$old_pid" -o comm= 2>/dev/null)" == *ffmpeg* ]]; then
     kill "$old_pid" 2>/dev/null || true
     sleep 0.1
   fi
-  rm -f "$PID_FILE"
 fi
 
 rm -f "$AUDIO_FILE"
