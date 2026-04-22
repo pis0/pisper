@@ -1,34 +1,41 @@
 #!/usr/bin/env bash
 # pisper-record: inicia gravação do mic em background via ffmpeg/AVFoundation.
 # Chamado pelo Hammerspoon on keyDown do atalho configurado.
+# Uso: pisper-record <session_id>
 set -euo pipefail
+umask 077
 
-# Hammerspoon spawna shell não-interativo — PATH mínimo sem brew.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
-PISPER_TMP="/tmp/pisper"
-mkdir -p "$PISPER_TMP"
+SESSION="${1:-default}"
+# Remove qualquer char suspeito no session id (defensivo — só alfanum+dash).
+SESSION="${SESSION//[^A-Za-z0-9_-]/}"
+[[ -z "$SESSION" ]] && SESSION="default"
 
-AUDIO_FILE="$PISPER_TMP/recording.wav"
-PID_FILE="$PISPER_TMP/ffmpeg.pid"
-LOG_FILE="$PISPER_TMP/record.log"
+# $TMPDIR no macOS já é per-user — evita exposição em /tmp compartilhado.
+PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+mkdir -m 700 -p "$PISPER_TMP"
 
-if [[ -f "$PID_FILE" ]]; then
-  old_pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
-    kill "$old_pid" 2>/dev/null || true
-    sleep 0.1
-  fi
-  rm -f "$PID_FILE"
-fi
+AUDIO_FILE="$PISPER_TMP/rec-$SESSION.wav"
+PID_FILE="$PISPER_TMP/ffmpeg-$SESSION.pid"
+LOG_FILE="$PISPER_TMP/record-$SESSION.log"
 
-rm -f "$AUDIO_FILE"
+rm -f "$AUDIO_FILE" "$PID_FILE"
 
 ffmpeg -hide_banner -loglevel error \
   -f avfoundation -i ":default" \
   -ar 16000 -ac 1 -y "$AUDIO_FILE" \
   </dev/null >"$LOG_FILE" 2>&1 &
+FFMPEG_PID=$!
+echo "$FFMPEG_PID" > "$PID_FILE"
 
-echo $! > "$PID_FILE"
+# Valida que ffmpeg subiu — sem isso, falha de mic deixa estado Lua inconsistente.
+sleep 0.15
+if ! kill -0 "$FFMPEG_PID" 2>/dev/null; then
+  rm -f "$PID_FILE" "$AUDIO_FILE"
+  echo "[pisper] ffmpeg failed to start" >&2
+  tail -n 5 "$LOG_FILE" >&2 2>/dev/null || true
+  exit 1
+fi

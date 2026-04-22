@@ -1,19 +1,43 @@
 #!/usr/bin/env bash
-# pisper-cancel: aborta gravação em andamento sem transcrever (click muito curto).
+# pisper-cancel: aborta gravação sem transcrever.
+# Uso: pisper-cancel [<session_id>]   — sem arg, limpa TODAS as sessões órfãs (cleanup no init).
 set -euo pipefail
+umask 077
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
 
-PISPER_TMP="/tmp/pisper"
-PID_FILE="$PISPER_TMP/ffmpeg.pid"
-AUDIO_FILE="$PISPER_TMP/recording.wav"
+SESSION="${1:-}"
+SESSION="${SESSION//[^A-Za-z0-9_-]/}"
 
-if [[ -f "$PID_FILE" ]]; then
-  pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
-  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+PISPER_TMP="${TMPDIR:-/tmp}/pisper"
+[[ -d "$PISPER_TMP" ]] || exit 0
+
+kill_pid_file() {
+  local pid_file="$1"
+  [[ -f "$pid_file" ]] || return
+  local pid
+  pid=$(cat "$pid_file" 2>/dev/null || echo "")
+  rm -f "$pid_file"
+  if [[ -n "$pid" ]] && [[ "$(ps -p "$pid" -o comm= 2>/dev/null)" == *ffmpeg* ]]; then
     kill -TERM "$pid" 2>/dev/null || true
   fi
-  rm -f "$PID_FILE"
-fi
+}
 
-rm -f "$AUDIO_FILE"
+if [[ -n "$SESSION" ]]; then
+  PID_FILE="$PISPER_TMP/ffmpeg-$SESSION.pid"
+  # Cancel pode rodar antes de pisper-record escrever o PID (hold ultra-curto).
+  # Aguarda até 300ms pelo arquivo pra evitar deixar ffmpeg órfão.
+  for _ in 1 2 3 4 5 6; do
+    [[ -f "$PID_FILE" ]] && break
+    sleep 0.05
+  done
+  kill_pid_file "$PID_FILE"
+  rm -f "$PISPER_TMP/rec-$SESSION.wav" "$PISPER_TMP/rec-$SESSION.trimmed.wav"
+else
+  # Cleanup geral — usado no init() do Hammerspoon pra limpar órfãos de reload.
+  for f in "$PISPER_TMP"/ffmpeg-*.pid; do
+    [[ -e "$f" ]] || continue
+    kill_pid_file "$f"
+  done
+  rm -f "$PISPER_TMP"/rec-*.wav "$PISPER_TMP"/rec-*.trimmed.wav
+fi

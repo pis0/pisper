@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Build tarball
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          PKG="pisper-${VERSION}"
+          mkdir -p "dist/$PKG"
+          cp -R bin hammerspoon install.sh .env.example README.md "dist/$PKG/"
+          tar -czf "dist/${PKG}.tar.gz" -C dist "$PKG"
+          ls -la dist/
+
+      - name: Create release
+        uses: softprops/action-gh-release@72f2c25fcb47643c292f7107632f7a47c1df5cd8 # v2
+        with:
+          generate_release_notes: true
+          files: dist/pisper-*.tar.gz
