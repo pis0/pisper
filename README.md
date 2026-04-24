@@ -71,6 +71,23 @@ What `install.sh` does:
 
 **To uninstall**, remove the block between `-- pisper: BEGIN (auto)` and `-- pisper: END (auto)` in `~/.hammerspoon/init.lua`, delete `~/.config/pisper/`, and reload Hammerspoon.
 
+### Install flags (optional)
+
+`install.sh` accepts a few flags so the entire setup can be done in one non-interactive command — useful when an agent is automating the install for you.
+
+```sh
+./install.sh --api-key sk-your-token --language pt
+```
+
+| Flag | What it does |
+|------|---|
+| `--api-key <sk-…>` | Writes `OPENAI_API_KEY` into `~/.config/pisper/env` (replaces any existing uncommented value, keeps the file `chmod 600`). |
+| `--model <name>` | Sets `PISPER_MODEL` (e.g. `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`). |
+| `--language <iso>` | Sets `PISPER_LANGUAGE` to an ISO-639-1 code (`pt`, `en`, `es`, …). Omit to auto-detect. |
+| `-h`, `--help` | Show usage. |
+
+The script is idempotent: running it again updates the env in place without duplicating lines or re-injecting the Hammerspoon block. The closing `next steps` output adapts to what's still pending — if `--api-key` was used and Hammerspoon is already running, the only remaining step is granting the three macOS permissions.
+
 ## Configure your API key
 
 Edit `~/.config/pisper/env`:

@@ -19,6 +19,81 @@ ok()  { printf '%b✓%b %s\n' "$green" "$reset" "$*"; }
 warn(){ printf '%b!%b %s\n' "$yellow" "$reset" "$*"; }
 err() { printf '%b✗%b %s\n' "$red" "$reset" "$*" >&2; }
 
+print_help() {
+  cat <<'EOF'
+Usage: ./install.sh [OPTIONS]
+
+Set up pisper on this machine. Validates dependencies, creates the user
+config at ~/.config/pisper/env, and wires the Lua module into Hammerspoon's
+init.lua. Running it again is safe — idempotent via marker block and env
+rewrite.
+
+Options:
+  --api-key <sk-...>    Write OPENAI_API_KEY into ~/.config/pisper/env
+                        (replaces any existing uncommented value).
+  --model <name>        Set PISPER_MODEL. Options:
+                          gpt-4o-transcribe (default if unset)
+                          gpt-4o-mini-transcribe
+                          whisper-1
+  --language <iso>      Set PISPER_LANGUAGE — pin the transcription
+                        language as an ISO-639-1 code (pt, en, es, fr, …).
+                        Omit to let the model auto-detect.
+  -h, --help            Show this help and exit.
+
+With no flags the script still wires up Hammerspoon and leaves the env
+file for you to fill in manually. The flags exist so agents automating
+an install can skip the manual edit step.
+
+Examples:
+  ./install.sh
+  ./install.sh --api-key sk-abc123...
+  ./install.sh --api-key sk-abc123... --language pt
+  ./install.sh --model gpt-4o-mini-transcribe --language en
+EOF
+}
+
+OPT_API_KEY=""
+OPT_MODEL=""
+OPT_LANGUAGE=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --api-key)
+      [[ -n "${2:-}" ]] || { err "--api-key requires a value"; exit 2; }
+      OPT_API_KEY="$2"; shift 2 ;;
+    --api-key=*)
+      OPT_API_KEY="${1#*=}"; shift ;;
+    --model)
+      [[ -n "${2:-}" ]] || { err "--model requires a value"; exit 2; }
+      OPT_MODEL="$2"; shift 2 ;;
+    --model=*)
+      OPT_MODEL="${1#*=}"; shift ;;
+    --language)
+      [[ -n "${2:-}" ]] || { err "--language requires a value"; exit 2; }
+      OPT_LANGUAGE="$2"; shift 2 ;;
+    --language=*)
+      OPT_LANGUAGE="${1#*=}"; shift ;;
+    -h|--help)
+      print_help; exit 0 ;;
+    *)
+      err "unknown option: $1 (try --help)"; exit 2 ;;
+  esac
+done
+
+# Idempotent env edit: strip any existing uncommented lines for $key, then
+# append $key=$value. Commented documentation in .env.example is preserved.
+set_env_var() {
+  local key="$1" value="$2" file="$3"
+  local tmp
+  tmp=$(mktemp "${file}.XXXXXX")
+  chmod 600 "$tmp"
+  # grep -v returns non-zero when every line matches — tolerate that.
+  grep -v -E "^[[:space:]]*${key}=" "$file" > "$tmp" || true
+  printf '%s=%s\n' "$key" "$value" >> "$tmp"
+  mv "$tmp" "$file"
+  chmod 600 "$file"
+}
+
 say "${bold}pisper install${reset}"
 say "  project: $PISPER_DIR"
 
@@ -49,12 +124,26 @@ chmod 700 "$CONFIG_DIR"
 if [[ ! -f "$CONFIG_ENV" ]]; then
   cp "$PISPER_DIR/.env.example" "$CONFIG_ENV"
   warn "config created at $CONFIG_ENV"
-  warn "edit it and set your OPENAI_API_KEY before use"
 else
   ok "config exists at $CONFIG_ENV"
 fi
 # Always reassert chmod — if the file already existed with a loose mode, the key was exposed.
 chmod 600 "$CONFIG_ENV"
+
+# Apply any values passed via flags. We intentionally skip echoing the key
+# value itself (it's a secret) — just confirm it was written.
+if [[ -n "$OPT_API_KEY" ]]; then
+  set_env_var "OPENAI_API_KEY" "$OPT_API_KEY" "$CONFIG_ENV"
+  ok "OPENAI_API_KEY written to $CONFIG_ENV"
+fi
+if [[ -n "$OPT_MODEL" ]]; then
+  set_env_var "PISPER_MODEL" "$OPT_MODEL" "$CONFIG_ENV"
+  ok "PISPER_MODEL=$OPT_MODEL"
+fi
+if [[ -n "$OPT_LANGUAGE" ]]; then
+  set_env_var "PISPER_LANGUAGE" "$OPT_LANGUAGE" "$CONFIG_ENV"
+  ok "PISPER_LANGUAGE=$OPT_LANGUAGE"
+fi
 
 # 4. hook into Hammerspoon init.lua
 mkdir -p "$HS_DIR"
@@ -108,9 +197,25 @@ else
   say  "  → open -a Hammerspoon"
 fi
 
+# Dynamic next steps: skip the ones that are already satisfied so the output
+# reflects what the user actually still has to do. Agents reading this output
+# can relay only the remaining work.
 say ""
 say "${bold}next steps${reset}"
-say "  1. edit $CONFIG_ENV and set OPENAI_API_KEY"
-say "  2. launch Hammerspoon (if not running): open -a Hammerspoon"
-say "  3. grant permissions: Accessibility + Microphone + Input Monitoring"
-say "  4. test: hold ${bold}Right Option${reset}, speak, release — text is pasted at the cursor"
+n=0
+# Key is considered "set" if there's an OPENAI_API_KEY= line starting with sk-
+# followed by plausible key characters. The placeholder sk-... from .env.example
+# would not match — we want the real one.
+if ! grep -qE '^[[:space:]]*OPENAI_API_KEY=sk-[A-Za-z0-9_-]{20,}' "$CONFIG_ENV" 2>/dev/null; then
+  n=$((n+1))
+  say "  $n. edit $CONFIG_ENV and set OPENAI_API_KEY (or re-run with --api-key sk-...)"
+fi
+if ! pgrep -qx Hammerspoon; then
+  n=$((n+1))
+  say "  $n. launch Hammerspoon: open -a Hammerspoon"
+fi
+n=$((n+1))
+say "  $n. grant macOS permissions to Hammerspoon (System Settings → Privacy & Security):"
+say "      Accessibility, Input Monitoring, Microphone"
+n=$((n+1))
+say "  $n. test: hold ${bold}Right Option${reset}, speak, release — text is pasted at the cursor"
