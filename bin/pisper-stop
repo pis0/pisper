@@ -30,36 +30,54 @@ cleanup() { rm -f "$RAW_AUDIO" "$TRIMMED"; }
 trap cleanup EXIT
 
 # Stop pode rodar antes de pisper-record escrever o PID (race em hold curto).
-for _ in 1 2 3 4 5 6; do
+# pisper-record só publica o pid-file depois de validar ffmpeg + capturar
+# fingerprint (~200ms), então damos margem de 500ms.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
   [[ -f "$PID_FILE" ]] && break
   sleep 0.05
 done
 
+pid=""
 if [[ -f "$PID_FILE" ]]; then
-  pid=$(cat "$PID_FILE" 2>/dev/null || echo "")
+  # Formato: linha 1 = PID, linha 2 = fingerprint (lstart do ps).
+  saved_pid=""; saved_fp=""
+  { read -r saved_pid; read -r saved_fp; } < "$PID_FILE" 2>/dev/null || true
   rm -f "$PID_FILE"
-  if [[ -n "$pid" ]] && [[ "$(ps -p "$pid" -o comm= 2>/dev/null)" == *ffmpeg* ]]; then
-    kill -INT "$pid" 2>/dev/null || true
+
+  # Só confia que é nosso ffmpeg se PID vive E fingerprint bate. Previne
+  # matar um ffmpeg de outro processo que tenha herdado o PID reciclado.
+  # Pid-files sem fingerprint (arquivos de versão antiga ou parciais) são
+  # tratados como stale — conservador.
+  if [[ -n "$saved_pid" ]] && [[ -n "$saved_fp" ]]; then
+    current_fp=$(LC_ALL=C ps -p "$saved_pid" -o lstart= 2>/dev/null | awk '{$1=$1; print}')
+    current_comm=$(ps -p "$saved_pid" -o comm= 2>/dev/null)
+    if [[ "$current_fp" == "$saved_fp" ]] && [[ "$current_comm" == *ffmpeg* ]]; then
+      pid="$saved_pid"
+    fi
+  fi
+fi
+
+if [[ -n "$pid" ]]; then
+  kill -INT "$pid" 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.05
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -TERM "$pid" 2>/dev/null || true
     for _ in 1 2 3 4 5 6 7 8 9 10; do
       kill -0 "$pid" 2>/dev/null || break
       sleep 0.05
     done
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-      for _ in 1 2 3 4 5 6 7 8 9 10; do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.05
-      done
-    fi
-    # Último recurso: SIGKILL. Nunca transcrever wav enquanto ffmpeg pode estar escrevendo.
-    if kill -0 "$pid" 2>/dev/null; then
-      kill -KILL "$pid" 2>/dev/null || true
-      sleep 0.1
-    fi
-    if kill -0 "$pid" 2>/dev/null; then
-      log_err "ffmpeg refused to exit (pid $pid) — aborting transcription"
-      exit 1
-    fi
+  fi
+  # Último recurso: SIGKILL. Nunca transcrever wav enquanto ffmpeg pode estar escrevendo.
+  if kill -0 "$pid" 2>/dev/null; then
+    kill -KILL "$pid" 2>/dev/null || true
+    sleep 0.1
+  fi
+  if kill -0 "$pid" 2>/dev/null; then
+    log_err "ffmpeg refused to exit (pid $pid) — aborting transcription"
+    exit 1
   fi
 fi
 
