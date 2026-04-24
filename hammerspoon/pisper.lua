@@ -146,7 +146,6 @@ function M.init(opts)
     [62] = rawMasks.controlRight,
     [63] = rawMasks.secondaryFn,
   }
-  local bit = require('bit')
 
   -- Detect hold of the modifier via flagsChanged. The keyCode identifies the
   -- specific physical key that changed state (e.g. Right Option, not any Option).
@@ -159,8 +158,10 @@ function M.init(opts)
     if mask then
       -- Preferred path: check the bit for this exact physical key, immune to
       -- aggregate flags staying true because of the opposite left/right key.
+      -- Hammerspoon embeds Lua 5.4 which has native bitwise operators — no
+      -- need for a `bit` module (that's LuaJIT only).
       local rawFlags = event:getRawEventData().CGEventData.flags or 0
-      isDown = bit.band(rawFlags, mask) ~= 0
+      isDown = (rawFlags & mask) ~= 0
     else
       -- Fallback for the rare keyCode that isn't in the mask table.
       local flags = event:getFlags()
