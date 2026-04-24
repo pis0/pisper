@@ -71,6 +71,25 @@ What `install.sh` does:
 
 **To uninstall**, remove the block between `-- pisper: BEGIN (auto)` and `-- pisper: END (auto)` in `~/.hammerspoon/init.lua`, delete `~/.config/pisper/`, and reload Hammerspoon.
 
+### Install flags (optional)
+
+`install.sh` accepts a few flags so the entire setup can be done in one non-interactive command — useful when an agent is automating the install for you.
+
+```sh
+echo "$OPENAI_KEY" | ./install.sh --api-key-stdin --language pt
+```
+
+| Flag | What it does |
+|------|---|
+| `--api-key-stdin` | Reads `OPENAI_API_KEY` from the first line of stdin and writes it to `~/.config/pisper/env` with `chmod 600`. Takes the token via a pipe or redirect so it never appears in `argv` or shell history. When stdin is a terminal, the script prompts and hides what you type. |
+| `--model <name>` | Sets `PISPER_MODEL` (`gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`). |
+| `--language <iso>` | Sets `PISPER_LANGUAGE` to an ISO-639-1 code (`pt`, `en`, `es`, …). Omit to auto-detect. |
+| `-h`, `--help` | Show usage. |
+
+> `--api-key sk-...` as a direct argument is **not** supported on purpose — it would leak the token through `ps auxww` and the shell's history file. Use `--api-key-stdin` with a pipe or `<` redirect instead.
+
+The script is idempotent: running it again updates the env in place without duplicating lines or re-injecting the Hammerspoon block. The closing `next steps` output adapts to what's still pending — if the key was written via `--api-key-stdin` and Hammerspoon is already running, the only remaining step is granting the three macOS permissions.
+
 ## Configure your API key
 
 Edit `~/.config/pisper/env`:
