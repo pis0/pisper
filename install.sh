@@ -29,8 +29,15 @@ init.lua. Running it again is safe — idempotent via marker block and env
 rewrite.
 
 Options:
-  --api-key <sk-...>    Write OPENAI_API_KEY into ~/.config/pisper/env
-                        (replaces any existing uncommented value).
+  --api-key-stdin       Read OPENAI_API_KEY from stdin (first line) and
+                        write it to ~/.config/pisper/env. Keeps the token
+                        out of argv and shell history — use this for
+                        scripted installs. When stdin is a terminal, the
+                        prompt hides what you type.
+                        Examples:
+                          echo "$KEY" | ./install.sh --api-key-stdin
+                          ./install.sh --api-key-stdin < key.txt
+                          ./install.sh --api-key-stdin   # prompts (hidden)
   --model <name>        Set PISPER_MODEL. Options:
                           gpt-4o-transcribe (default if unset)
                           gpt-4o-mini-transcribe
@@ -42,27 +49,25 @@ Options:
 
 With no flags the script still wires up Hammerspoon and leaves the env
 file for you to fill in manually. The flags exist so agents automating
-an install can skip the manual edit step.
+an install can skip the manual edit step without placing the API key
+in argv.
 
 Examples:
   ./install.sh
-  ./install.sh --api-key sk-abc123...
-  ./install.sh --api-key sk-abc123... --language pt
+  echo "$OPENAI_KEY" | ./install.sh --api-key-stdin --language pt
   ./install.sh --model gpt-4o-mini-transcribe --language en
 EOF
 }
 
 OPT_API_KEY=""
+OPT_READ_STDIN=0
 OPT_MODEL=""
 OPT_LANGUAGE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --api-key)
-      [[ -n "${2:-}" ]] || { err "--api-key requires a value"; exit 2; }
-      OPT_API_KEY="$2"; shift 2 ;;
-    --api-key=*)
-      OPT_API_KEY="${1#*=}"; shift ;;
+    --api-key-stdin)
+      OPT_READ_STDIN=1; shift ;;
     --model)
       [[ -n "${2:-}" ]] || { err "--model requires a value"; exit 2; }
       OPT_MODEL="$2"; shift 2 ;;
@@ -75,10 +80,32 @@ while [[ $# -gt 0 ]]; do
       OPT_LANGUAGE="${1#*=}"; shift ;;
     -h|--help)
       print_help; exit 0 ;;
+    --api-key|--api-key=*)
+      # Refuse the old argv-visible form. ps auxww and shell history would
+      # leak the token. Redirect users to --api-key-stdin instead.
+      err "--api-key is not supported (would leak via argv / shell history)"
+      err "use --api-key-stdin and pipe the key: echo \"\$KEY\" | ./install.sh --api-key-stdin"
+      exit 2 ;;
     *)
       err "unknown option: $1 (try --help)"; exit 2 ;;
   esac
 done
+
+# Read the API key from stdin if requested. Hide input when stdin is a TTY
+# (interactive user typing), plain read when it's a pipe/redirect (agent).
+if [[ $OPT_READ_STDIN -eq 1 ]]; then
+  if [[ -t 0 ]]; then
+    printf 'Paste OPENAI_API_KEY (input hidden): '
+    IFS= read -rs OPT_API_KEY || true
+    printf '\n'
+  else
+    IFS= read -r OPT_API_KEY || true
+  fi
+  if [[ -z "$OPT_API_KEY" ]]; then
+    err "--api-key-stdin: no key read from stdin"
+    exit 2
+  fi
+fi
 
 # Idempotent env edit: strip any existing uncommented lines for $key, then
 # append $key=$value. Commented documentation in .env.example is preserved.

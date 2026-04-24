@@ -76,17 +76,19 @@ What `install.sh` does:
 `install.sh` accepts a few flags so the entire setup can be done in one non-interactive command — useful when an agent is automating the install for you.
 
 ```sh
-./install.sh --api-key sk-your-token --language pt
+echo "$OPENAI_KEY" | ./install.sh --api-key-stdin --language pt
 ```
 
 | Flag | What it does |
 |------|---|
-| `--api-key <sk-…>` | Writes `OPENAI_API_KEY` into `~/.config/pisper/env` (replaces any existing uncommented value, keeps the file `chmod 600`). |
-| `--model <name>` | Sets `PISPER_MODEL` (e.g. `gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`). |
+| `--api-key-stdin` | Reads `OPENAI_API_KEY` from the first line of stdin and writes it to `~/.config/pisper/env` with `chmod 600`. Takes the token via a pipe or redirect so it never appears in `argv` or shell history. When stdin is a terminal, the script prompts and hides what you type. |
+| `--model <name>` | Sets `PISPER_MODEL` (`gpt-4o-transcribe`, `gpt-4o-mini-transcribe`, `whisper-1`). |
 | `--language <iso>` | Sets `PISPER_LANGUAGE` to an ISO-639-1 code (`pt`, `en`, `es`, …). Omit to auto-detect. |
 | `-h`, `--help` | Show usage. |
 
-The script is idempotent: running it again updates the env in place without duplicating lines or re-injecting the Hammerspoon block. The closing `next steps` output adapts to what's still pending — if `--api-key` was used and Hammerspoon is already running, the only remaining step is granting the three macOS permissions.
+> `--api-key sk-...` as a direct argument is **not** supported on purpose — it would leak the token through `ps auxww` and the shell's history file. Use `--api-key-stdin` with a pipe or `<` redirect instead.
+
+The script is idempotent: running it again updates the env in place without duplicating lines or re-injecting the Hammerspoon block. The closing `next steps` output adapts to what's still pending — if the key was written via `--api-key-stdin` and Hammerspoon is already running, the only remaining step is granting the three macOS permissions.
 
 ## Configure your API key
 
