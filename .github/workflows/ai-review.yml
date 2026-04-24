@@ -7,6 +7,12 @@ on:
 
 jobs:
   codex-review:
+    # Skip on pull requests coming from forks. On a fork PR, secrets are not
+    # forwarded to the workflow (Codex would fail for lack of OPENAI_REVIEW_KEY)
+    # and the GITHUB_TOKEN is downgraded to read-only (the post-review job
+    # could not comment anyway). Guarding here avoids noisy failed checks on
+    # external PRs — internal PRs (head repo == base repo) still run normally.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,7 +45,11 @@ jobs:
   post-review:
     runs-on: ubuntu-latest
     needs: codex-review
-    if: needs.codex-review.outputs.final_message != ''
+    # Same guard as codex-review: skip on fork PRs. And still only post when
+    # there is an actual Codex message to relay.
+    if: |
+      github.event.pull_request.head.repo.full_name == github.repository
+      && needs.codex-review.outputs.final_message != ''
     permissions:
       pull-requests: write
     steps:
