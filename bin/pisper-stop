@@ -23,10 +23,14 @@ PID_FILE="$PISPER_TMP/ffmpeg-$SESSION.pid"
 ENV_FILE="${PISPER_ENV_FILE:-$HOME/.config/pisper/env}"
 MODEL="${PISPER_MODEL:-gpt-4o-transcribe}"
 
+# Arquivo com o header de auth — nunca colocamos o token em argv, onde outros
+# processos poderiam ler via `ps auxww`.
+HEADER_FILE=""
+
 log_err() { echo "[pisper] $*" >&2; }
 
 # Remove ambos — AUDIO_FILE pode ter sido reatribuído pra TRIMMED depois, então bruto ficaria.
-cleanup() { rm -f "$RAW_AUDIO" "$TRIMMED"; }
+cleanup() { rm -f "$RAW_AUDIO" "$TRIMMED" "${HEADER_FILE:-}"; }
 trap cleanup EXIT
 
 # Stop pode rodar antes de pisper-record escrever o PID (race em hold curto).
@@ -110,13 +114,20 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
+# Escreve o header de auth num arquivo chmod 600 em $TMPDIR (per-user).
+# curl -H "@file" lê a linha de header do arquivo, mantendo o token fora de argv.
+# Requer curl 7.55+ (macOS 10.14+ já atende).
+HEADER_FILE=$(mktemp "$PISPER_TMP/auth-$SESSION.XXXXXX")
+chmod 600 "$HEADER_FILE"
+printf 'Authorization: Bearer %s\n' "$OPENAI_API_KEY" > "$HEADER_FILE"
+
 # Capture HTTP status separately so we can surface specific failures
 # (quota, auth, rate limit) instead of a generic "API request failed".
 curl_exit=0
 http_response=$(curl -sS --max-time 60 \
   -w $'\n%{http_code}' \
   -X POST https://api.openai.com/v1/audio/transcriptions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "@$HEADER_FILE" \
   -F "model=$MODEL" \
   -F "file=@$AUDIO_FILE" \
   -F "response_format=json" 2>/dev/null) || curl_exit=$?

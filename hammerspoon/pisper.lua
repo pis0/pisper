@@ -42,15 +42,18 @@ function M.startRecording()
   recordingStartedAt = hs.timer.secondsSinceEpoch()
   alert("🎤 pisper", 0.4)
   runAsync(M.binPath .. "/pisper-record", { sid }, function(exitCode, _, stderr)
-    -- Se ffmpeg não subiu, reseta o estado — mas só se ainda estivermos nessa mesma sessão
-    -- (usuário pode ter solto e holdado de novo entre o fail e o callback).
+    -- pisper-record pode falhar legitimamente (mic negado, ffmpeg ausente) ou
+    -- porque pisper-cancel matou o ffmpeg em click curto (< minDuration) antes
+    -- da janela de validação fechar. Só alertamos se ainda estivermos nesta
+    -- sessão — caso contrário o usuário já cancelou e o alerta vira ruído,
+    -- quebrando a UX de cancelamento silencioso.
     if exitCode ~= 0 then
       if currentSession == sid then
         isRecording = false
         recordingStartedAt = nil
         currentSession = nil
+        hs.alert.show("pisper: failed to start\n" .. stderr, 2)
       end
-      hs.alert.show("pisper: failed to start\n" .. stderr, 2)
     end
   end)
 end
