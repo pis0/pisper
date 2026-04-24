@@ -92,20 +92,49 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
-response=$(curl -sS --fail-with-body --max-time 60 \
+# Capture HTTP status separately so we can surface specific failures
+# (quota, auth, rate limit) instead of a generic "API request failed".
+curl_exit=0
+http_response=$(curl -sS --max-time 60 \
+  -w $'\n%{http_code}' \
   -X POST https://api.openai.com/v1/audio/transcriptions \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -F "model=$MODEL" \
   -F "file=@$AUDIO_FILE" \
-  -F "response_format=json" 2>&1) || {
-  log_err "API request failed"
-  exit 1
-}
+  -F "response_format=json" 2>/dev/null) || curl_exit=$?
 
-if ! text=$(printf '%s' "$response" | jq -r '.text // empty' 2>/dev/null); then
-  log_err "failed to parse API response"
+if (( curl_exit != 0 )); then
+  case "$curl_exit" in
+    28) log_err "OpenAI request timed out" ;;
+    6|7) log_err "cannot reach OpenAI — check connection" ;;
+    *)  log_err "curl failed (exit $curl_exit)" ;;
+  esac
   exit 1
 fi
+
+http_status="${http_response##*$'\n'}"
+response="${http_response%$'\n'*}"
+
+if [[ "$http_status" != "200" ]]; then
+  err_code=$(printf '%s' "$response" | jq -r '.error.code // empty' 2>/dev/null || echo "")
+  err_msg=$(printf '%s' "$response" | jq -r '.error.message // empty' 2>/dev/null || echo "")
+  case "$http_status" in
+    401) log_err "OpenAI auth failed — check OPENAI_API_KEY" ;;
+    429)
+      if [[ "$err_code" == "insufficient_quota" ]]; then
+        log_err "OpenAI quota exceeded — top up at platform.openai.com"
+      else
+        log_err "OpenAI rate limited — try again shortly"
+      fi
+      ;;
+    413) log_err "audio too large for OpenAI (>25MB limit)" ;;
+    5*)  log_err "OpenAI server error (HTTP $http_status) — retry" ;;
+    *)   log_err "OpenAI HTTP $http_status${err_msg:+: $err_msg}" ;;
+  esac
+  exit 1
+fi
+
+text=$(printf '%s' "$response" | jq -r '.text // empty' 2>/dev/null || echo "")
 
 if [[ -z "$text" ]]; then
   log_err "empty transcription"
