@@ -29,7 +29,11 @@ local function runAsync(path, args, cb)
   local task = hs.task.new(path, function(exitCode, stdout, stderr)
     if cb then cb(exitCode, stdout or "", stderr or "") end
   end, args or {})
-  task:start()
+  -- hs.task.new retorna nil se launchPath não existe; task:start retorna
+  -- nil se o spawn falha. Sem essas checagens o callback nunca é chamado
+  -- e o estado a cargo do caller vira fantasma.
+  if not task then return nil, "launch path not found" end
+  if not task:start() then return nil, "task:start failed" end
   return task
 end
 
@@ -37,11 +41,14 @@ function M.startRecording()
   if isRecording then return end
   sessionSeq = sessionSeq + 1
   local sid = tostring(sessionSeq)
+
+  -- Registra ownership antes do task:start pra callback identificar a sessão
+  -- corretamente mesmo em dispatch ultra-rápido. isRecording só entra em true
+  -- depois de confirmar start — evita estado "gravando" sem gravação real
+  -- se binPath estiver stale ou o exec bit tiver se perdido.
   currentSession = sid
-  isRecording = true
-  recordingStartedAt = hs.timer.secondsSinceEpoch()
-  alert("🎤 pisper", 0.4)
-  runAsync(M.binPath .. "/pisper-record", { sid }, function(exitCode, _, stderr)
+
+  local task, err = runAsync(M.binPath .. "/pisper-record", { sid }, function(exitCode, _, stderr)
     -- pisper-record pode falhar legitimamente (mic negado, ffmpeg ausente) ou
     -- porque pisper-cancel matou o ffmpeg em click curto (< minDuration) antes
     -- da janela de validação fechar. Só alertamos se ainda estivermos nesta
@@ -56,6 +63,17 @@ function M.startRecording()
       end
     end
   end)
+
+  if not task then
+    -- Callback async nunca virá — rollback manual do estado.
+    currentSession = nil
+    hs.alert.show("pisper: " .. (err or "failed to spawn recorder"), 2)
+    return
+  end
+
+  isRecording = true
+  recordingStartedAt = hs.timer.secondsSinceEpoch()
+  alert("🎤 pisper", 0.4)
 end
 
 function M.stopRecording()
