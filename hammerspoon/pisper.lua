@@ -1,13 +1,15 @@
--- pisper: voice-to-text global para macOS via Hammerspoon + OpenAI Whisper.
--- Hold-to-talk: segure a tecla configurada, fale, solte — o texto é colado no app em foco.
+-- pisper: global voice-to-text for macOS via Hammerspoon + OpenAI Whisper.
+-- Hold-to-talk: hold the configured key, speak, release — the transcribed text
+-- is pasted into the focused app.
 
 local M = {}
 
--- keyCode do Right Option (0x3D = 61). Outros úteis:
+-- Right Option keyCode (0x3D = 61). Other useful ones:
 --   Right Command: 54 | Right Shift: 60 | Right Control: 62 | Fn: 63
--- Só teclas modifier funcionam — flagsChanged não dispara em keys regulares (F13–F19 etc).
+-- Only modifier keys work here — flagsChanged doesn't fire for regular keys
+-- (F13–F19 and friends).
 local DEFAULT_KEYCODE = 61
-local DEFAULT_MIN_DURATION = 0.25 -- segundos; clicks rápidos são cancelados
+local DEFAULT_MIN_DURATION = 0.25 -- seconds; shorter clicks are cancelled silently
 
 local isRecording = false
 local recordingStartedAt = nil
@@ -29,9 +31,9 @@ local function runAsync(path, args, cb)
   local task = hs.task.new(path, function(exitCode, stdout, stderr)
     if cb then cb(exitCode, stdout or "", stderr or "") end
   end, args or {})
-  -- hs.task.new retorna nil se launchPath não existe; task:start retorna
-  -- nil se o spawn falha. Sem essas checagens o callback nunca é chamado
-  -- e o estado a cargo do caller vira fantasma.
+  -- hs.task.new returns nil when launchPath doesn't exist; task:start returns
+  -- nil when the spawn fails. Without these checks the callback never fires
+  -- and whatever state the caller set up becomes a zombie.
   if not task then return nil, "launch path not found" end
   if not task:start() then return nil, "task:start failed" end
   return task
@@ -42,18 +44,19 @@ function M.startRecording()
   sessionSeq = sessionSeq + 1
   local sid = tostring(sessionSeq)
 
-  -- Registra ownership antes do task:start pra callback identificar a sessão
-  -- corretamente mesmo em dispatch ultra-rápido. isRecording só entra em true
-  -- depois de confirmar start — evita estado "gravando" sem gravação real
-  -- se binPath estiver stale ou o exec bit tiver se perdido.
+  -- Register ownership before task:start so the callback can identify this
+  -- session correctly even on an ultra-fast dispatch. isRecording flips to
+  -- true only after we confirm the task started — that avoids a "recording"
+  -- state with no actual recording when binPath is stale or the exec bit is
+  -- gone.
   currentSession = sid
 
   local task, err = runAsync(M.binPath .. "/pisper-record", { sid }, function(exitCode, _, stderr)
-    -- pisper-record pode falhar legitimamente (mic negado, ffmpeg ausente) ou
-    -- porque pisper-cancel matou o ffmpeg em click curto (< minDuration) antes
-    -- da janela de validação fechar. Só alertamos se ainda estivermos nesta
-    -- sessão — caso contrário o usuário já cancelou e o alerta vira ruído,
-    -- quebrando a UX de cancelamento silencioso.
+    -- pisper-record can fail legitimately (mic denied, ffmpeg missing) or
+    -- because pisper-cancel killed ffmpeg during a short-click (< minDuration)
+    -- before the validation window closed. Only alert if we're still in this
+    -- session — otherwise the user already cancelled and the alert would be
+    -- noise, breaking the silent-cancel UX.
     if exitCode ~= 0 then
       if currentSession == sid then
         isRecording = false
@@ -65,7 +68,7 @@ function M.startRecording()
   end)
 
   if not task then
-    -- Callback async nunca virá — rollback manual do estado.
+    -- The async callback will never fire — roll state back manually.
     currentSession = nil
     hs.alert.show("pisper: " .. (err or "failed to spawn recorder"), 2)
     return
@@ -96,9 +99,9 @@ function M.stopRecording()
 
   alert("⏳ transcribing…", 0.5)
   local task, err = runAsync(M.binPath .. "/pisper-stop", { sid }, function(exitCode, stdout, stderr)
-    -- Se uma nova sessão começou enquanto esta transcrição rodava, o alerta
-    -- daqui sobrescreveria o feedback visual da nova. Suprime o antigo — o
-    -- texto já foi colado pelo pisper-stop via pbcopy+Cmd+V de qualquer jeito.
+    -- If a new session started while this transcription was running, this
+    -- alert would overwrite the new session's visual feedback. Suppress it —
+    -- the text was already pasted by pisper-stop (pbcopy + Cmd+V) anyway.
     if currentSession ~= nil and currentSession ~= sid then
       return
     end
@@ -119,17 +122,18 @@ function M.init(opts)
   M.keyCode = opts.keyCode or DEFAULT_KEYCODE
   M.minDuration = opts.minDuration or DEFAULT_MIN_DURATION
 
-  -- Reload do Hammerspoon durante gravação deixa ffmpeg órfão. Limpa sessões anteriores.
+  -- Reloading Hammerspoon during a recording leaves an orphan ffmpeg. Clear
+  -- out any prior sessions before wiring things back up.
   runAsync(M.binPath .. "/pisper-cancel", nil, nil)
 
-  -- permite reload via osascript/CLI (útil pra dev loop)
+  -- Allow reload via osascript / CLI (useful in a dev loop).
   hs.allowAppleScript(true)
 
-  -- rawFlagMasks permite distinguir lado esquerdo/direito da mesma família.
-  -- Sem isso, flags agregadas (flags.alt, flags.cmd etc.) travam em true
-  -- enquanto a contraparte estiver pressionada: usuário configura Right
-  -- Option como hotkey, segura com Left Option também → solta Right e a
-  -- gravação "fica presa" porque flags.alt segue true por conta do Left.
+  -- rawFlagMasks lets us distinguish left/right within the same modifier
+  -- family. Without this, the aggregate flags (flags.alt, flags.cmd, etc.)
+  -- stay true as long as the opposite side is held: user configures Right
+  -- Option as the hotkey and happens to be holding Left Option → releasing
+  -- Right doesn't drop flags.alt and the recording "sticks".
   local rawMasks = hs.eventtap.event.rawFlagMasks
   local KEY_MASK = {
     [54] = rawMasks.cmdRight,
@@ -144,8 +148,8 @@ function M.init(opts)
   }
   local bit = require('bit')
 
-  -- Detecta hold do modifier via flagsChanged. O keyCode identifica a tecla
-  -- específica que mudou de estado (ex: Right Option, não qualquer Option).
+  -- Detect hold of the modifier via flagsChanged. The keyCode identifies the
+  -- specific physical key that changed state (e.g. Right Option, not any Option).
   M.tap = hs.eventtap.new({ hs.eventtap.event.types.flagsChanged }, function(event)
     local code = event:getKeyCode()
     if code ~= M.keyCode then return false end
@@ -153,12 +157,12 @@ function M.init(opts)
     local isDown
     local mask = KEY_MASK[code]
     if mask then
-      -- Caminho preferido: bit específico da tecla física, imune a flags
-      -- agregadas manterem-se true via contraparte left/right.
+      -- Preferred path: check the bit for this exact physical key, immune to
+      -- aggregate flags staying true because of the opposite left/right key.
       local rawFlags = event:getRawEventData().CGEventData.flags or 0
       isDown = bit.band(rawFlags, mask) ~= 0
     else
-      -- Fallback pros raros keyCodes sem mask mapeado.
+      -- Fallback for the rare keyCode that isn't in the mask table.
       local flags = event:getFlags()
       isDown = flags.alt == true
     end

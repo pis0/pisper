@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# pisper-cancel: aborta gravação sem transcrever.
-# Uso: pisper-cancel [<session_id>]   — sem arg, limpa TODAS as sessões órfãs (cleanup no init).
+# pisper-cancel: aborts a recording without transcribing.
+# Usage: pisper-cancel [<session_id>]   — with no arg, clears ALL orphan sessions (init cleanup).
 set -euo pipefail
 umask 077
 
@@ -12,9 +12,9 @@ SESSION="${SESSION//[^A-Za-z0-9_-]/}"
 PISPER_TMP="${TMPDIR:-/tmp}/pisper"
 [[ -d "$PISPER_TMP" ]] || exit 0
 
-# Valida um pid-file e imprime o PID se ainda é nosso ffmpeg.
-# Vazio significa: arquivo ausente, formato inválido, PID morto, ou PID
-# reciclado pra outro processo (fingerprint não bate). Stale → só remover.
+# Validate a pid-file and print the PID if it still identifies our ffmpeg.
+# Empty output means: file missing, malformed, PID dead, or PID recycled to
+# another process (fingerprint no longer matches). Stale → just remove the file.
 validate_pid_file() {
   local pid_file="$1"
   [[ -f "$pid_file" ]] || return 0
@@ -28,8 +28,8 @@ validate_pid_file() {
   printf '%s' "$saved_pid"
 }
 
-# TERM + espera + SIGKILL fallback. Sem esse loop, o caller pode remover o .wav
-# enquanto ffmpeg ainda está escrevendo nele (finding: MEDIUM do Codex).
+# TERM + wait + SIGKILL fallback. Without this loop the caller could remove the
+# .wav while ffmpeg is still writing to it (Codex review flagged this as MEDIUM).
 kill_and_wait() {
   local pid="$1"
   [[ -n "$pid" ]] || return 0
@@ -39,7 +39,8 @@ kill_and_wait() {
     sleep 0.05
   done
   kill -KILL "$pid" 2>/dev/null || true
-  # Dá um respiro pro kernel reapear, pra não rm o .wav com processo zumbi ainda preso nele.
+  # Small settle to let the kernel reap, so we don't rm the .wav with a zombie
+  # process still attached to it.
   sleep 0.1
 }
 
@@ -51,10 +52,10 @@ process_pid_file() {
   kill_and_wait "$pid"
 }
 
-# Fallback pra achar ffmpeg pelo argv quando pid-file não está disponível.
-# Usado quando: (a) pid-file atrasou além do wait, (b) pisper-record crashou
-# entre spawn e publicação do pid-file, (c) cleanup geral capturou orfãos
-# sem pid-file. Match estrito por path exato evita matar ffmpegs alheios.
+# Fallback to find ffmpeg by argv when the pid-file isn't available.
+# Used when: (a) pid-file was delayed past the wait, (b) pisper-record crashed
+# between spawn and publishing the pid-file, (c) the bulk cleanup finds orphans
+# with no pid-file. Strict match on the exact path avoids killing unrelated ffmpegs.
 kill_by_audio_path() {
   local audio_path="$1"
   while read -r candidate; do
@@ -70,26 +71,26 @@ kill_by_audio_path() {
 if [[ -n "$SESSION" ]]; then
   PID_FILE="$PISPER_TMP/ffmpeg-$SESSION.pid"
   RAW_AUDIO="$PISPER_TMP/rec-$SESSION.wav"
-  # Cancel pode rodar antes de pisper-record escrever o PID (hold ultra-curto).
-  # pisper-record só publica o pid-file depois de validar ffmpeg + capturar
-  # fingerprint (~200ms), então damos margem de 500ms.
+  # Cancel can fire before pisper-record has written the PID (ultra-short hold).
+  # pisper-record only publishes the pid-file after validating ffmpeg and
+  # capturing the fingerprint (~200ms), so we allow up to 500ms here.
   for _ in 1 2 3 4 5 6 7 8 9 10; do
     [[ -f "$PID_FILE" ]] && break
     sleep 0.05
   done
   process_pid_file "$PID_FILE"
-  # Belt-and-suspenders: se pid-file atrasou, ainda achamos o ffmpeg pelo argv.
+  # Belt-and-suspenders: if the pid-file was delayed, we still find ffmpeg via argv.
   kill_by_audio_path "$RAW_AUDIO"
   rm -f "$RAW_AUDIO" "$PISPER_TMP/rec-$SESSION.trimmed.wav"
 else
-  # Cleanup geral — usado no init() do Hammerspoon pra limpar órfãos de reload.
-  # Fingerprint stale/reciclado → só remove o arquivo, nunca sinaliza PID alheio.
+  # Bulk cleanup — used in Hammerspoon's init() to clear orphans from a reload.
+  # Stale/recycled fingerprint → file is removed, no signal sent to any PID we don't own.
   for f in "$PISPER_TMP"/ffmpeg-*.pid; do
     [[ -e "$f" ]] || continue
     process_pid_file "$f"
   done
-  # Sweep de ffmpegs órfãos que perderam seu pid-file (crash entre spawn e
-  # publicação, ou pid-file removido sem o processo morrer junto).
+  # Sweep orphan ffmpegs that lost their pid-file (crashed between spawn and
+  # publish, or pid-file deleted without the process dying along with it).
   while read -r candidate; do
     [[ -n "$candidate" ]] || continue
     args=$(ps -p "$candidate" -o args= 2>/dev/null || echo "")

@@ -1,37 +1,35 @@
 # pisper
 
-Voice-to-text global para **macOS**. Segure uma tecla, fale, solte — o texto transcrito é colado onde o cursor estiver.
+Global voice-to-text for **macOS**. Hold a key, speak, release — the transcribed text is pasted wherever your cursor is.
 
-Funciona em qualquer app: terminais (Claude Code, Codex, Gemini CLI, iTerm2, Warp, Ghostty, Terminal do JetBrains), editores, navegador, WhatsApp Web, Slack, prompts nativos — se o app aceita `Cmd+V`, o pisper cola.
+Works in any app: terminals (Claude Code, Codex, Gemini CLI, iTerm2, Warp, Ghostty, JetBrains terminal), editors, browsers, WhatsApp Web, Slack, native prompts — if the app accepts `Cmd+V`, pisper pastes into it.
 
-> **Status:** macOS only. Suporte a Windows/Linux não está implementado hoje. PRs são bem-vindos.
+> **Status:** macOS only. Windows/Linux support is not implemented today. PRs welcome.
 
-<!-- TODO: adicionar demo.gif aqui mostrando o hold → fala → paste em um terminal -->
+## Why it exists
 
-## Por que existe
+Paid tools like Wispr Flow solve this well, but:
 
-Ferramentas pagas tipo Wispr Flow resolvem isso muito bem, mas:
+1. They are **closed source** — audio and transcription go through their backend
+2. They are **subscription-priced**, even if you already have an OpenAI account
+3. Many **don't work in terminals** (or work only with friction)
 
-1. São **closed source** — áudio e transcrição passam pelo backend delas
-2. São **pagas por assinatura**, mesmo que você já tenha uma conta OpenAI
-3. Muitas **não funcionam em terminal** (ou funcionam com fricção)
+pisper is the minimum that solves it: **global hold-to-talk**, your own API key, ~200 lines of shell and Lua, zero intermediate cloud other than OpenAI. For a developer who already juggles API keys and doesn't want another subscription, that's the right trade.
 
-O pisper é o mínimo que resolve: **hold-to-talk global**, sua própria API key, ~200 linhas de shell e Lua, zero cloud intermediária além da OpenAI. Pra dev que já mexe com API key e não quer mais uma assinatura, faz sentido.
-
-## Como funciona
+## How it works
 
 ```
-Hammerspoon (daemon macOS)
+Hammerspoon (macOS daemon)
     │
-    ├─ flagsChanged → detecta hold/release da tecla configurada
+    ├─ flagsChanged → detects hold/release of the configured key
     │
     ▼
 ffmpeg (AVFoundation)
     │
-    ├─ grava o mic default em 16kHz mono WAV
+    ├─ records the default mic as 16kHz mono WAV
     │
     ▼
-soltou a tecla
+key released
     │
     ▼
 curl → OpenAI /v1/audio/transcriptions
@@ -41,80 +39,80 @@ curl → OpenAI /v1/audio/transcriptions
     ▼
 pbcopy + osascript (Cmd+V)
     │
-    └─ texto colado no app em foco
+    └─ text pasted into the focused app
 ```
 
-Nenhum daemon custom, nenhum binário compilado, nenhum Electron. Tudo roda em cima de ferramentas que já estão no ecossistema (Hammerspoon, ffmpeg, curl, jq, pbcopy, osascript).
+No custom daemon, no compiled binary, no Electron. Everything runs on tools that are already part of the ecosystem (Hammerspoon, ffmpeg, curl, jq, pbcopy, osascript).
 
-## Pré-requisitos
+## Requirements
 
-- **macOS** (testado em Apple Silicon; Intel deve funcionar — `install.sh` busca em `/opt/homebrew/bin` e `/usr/local/bin`)
+- **macOS** (tested on Apple Silicon; Intel should work — `install.sh` looks in `/opt/homebrew/bin` and `/usr/local/bin`)
 - **Homebrew** ([brew.sh](https://brew.sh))
-- **Conta OpenAI** com uma API key ativa
+- **OpenAI account** with an active API key
 
-## Instalação
+## Install
 
 ```sh
-# 1. Dependências
+# 1. Dependencies
 brew install --cask hammerspoon
 brew install ffmpeg jq
 
-# 2. Clone e instale
+# 2. Clone and install
 git clone https://github.com/pis0/pisper.git ~/workspace/virtuware/pisper
 cd ~/workspace/virtuware/pisper
 ./install.sh
 ```
 
-O `install.sh`:
-- valida as dependências
-- cria `~/.config/pisper/env` (com `chmod 600`) a partir do `.env.example`
-- injeta um bloco marcado no seu `~/.hammerspoon/init.lua` (não sobrescreve config existente — só adiciona entre marcadores `-- pisper: BEGIN/END`)
-- recarrega o Hammerspoon se já estiver rodando
+What `install.sh` does:
+- verifies the dependencies
+- creates `~/.config/pisper/env` (with `chmod 600`) from `.env.example`
+- writes a marker-delimited block into your `~/.hammerspoon/init.lua` (does not overwrite your existing config — only appends between `-- pisper: BEGIN/END` markers)
+- reloads Hammerspoon if it's already running
 
-**Desinstalar** é remover o bloco entre `-- pisper: BEGIN (auto)` e `-- pisper: END (auto)` do `~/.hammerspoon/init.lua`, remover `~/.config/pisper/`, e recarregar o Hammerspoon.
+**To uninstall**, remove the block between `-- pisper: BEGIN (auto)` and `-- pisper: END (auto)` in `~/.hammerspoon/init.lua`, delete `~/.config/pisper/`, and reload Hammerspoon.
 
-## Configurar sua API key
+## Configure your API key
 
-Edite `~/.config/pisper/env`:
+Edit `~/.config/pisper/env`:
 
 ```sh
-OPENAI_API_KEY=sk-seu-token-aqui
+OPENAI_API_KEY=sk-your-token-here
 # PISPER_MODEL=gpt-4o-transcribe
 ```
 
-O arquivo é criado com `chmod 600` — só seu usuário lê. Se editar com editor que gera backup (`.swp`, `~`), confirme que eles não vazam fora desse diretório.
+The file is created with `chmod 600` — readable only by you. If you edit it with an editor that writes backup copies (`.swp`, `~`), make sure those don't leak outside that directory.
 
-**Coloque um hard limit** em [platform.openai.com → Billing → Usage limits](https://platform.openai.com/account/billing/limits). Mesmo com uso modesto, é higiene básica ter um teto mensal pra key que fica na sua máquina.
+**Set a hard limit** at [platform.openai.com → Billing → Usage limits](https://platform.openai.com/account/billing/limits). Even for modest use, keeping a monthly cap on a key that lives on your machine is basic hygiene.
 
-## Permissões do macOS
+## macOS permissions
 
-O macOS pede três permissões separadas pra esse fluxo funcionar. Na primeira vez que você segurar a tecla, o sistema vai bloquear e pedir pra autorizar cada uma. Todas se habilitam em **Ajustes do Sistema → Privacidade e Segurança**.
+macOS asks for three separate permissions before this flow works. The first time you hold the key, the system will block and ask you to authorize each one. All of them live under **System Settings → Privacy & Security**.
 
-### 1. Acessibilidade (obrigatória)
+### 1. Accessibility (required)
 
-**Por quê:** o Hammerspoon precisa injetar `Cmd+V` via `osascript`/System Events no app em foco. Sem isso, o texto fica no clipboard mas não é colado.
+**Why:** Hammerspoon needs to inject `Cmd+V` into the focused app via `osascript` / System Events. Without this, the text lands in the clipboard but does not paste.
 
-**Onde:** Privacidade e Segurança → Acessibilidade → habilite **Hammerspoon**.
+**Where:** Privacy & Security → Accessibility → enable **Hammerspoon**.
 
-### 2. Monitoramento de Entrada (obrigatória)
+### 2. Input Monitoring (required)
 
-**Por quê:** o hold global da tecla é detectado via `hs.eventtap` — o Hammerspoon precisa "ouvir" eventos de teclado em qualquer app, não só quando ele está em foco.
+**Why:** the global key-hold detection uses `hs.eventtap`, which needs to observe keyboard events across every app — not only when Hammerspoon is in focus.
 
-**Onde:** Privacidade e Segurança → Monitoramento de Entrada → habilite **Hammerspoon**.
+**Where:** Privacy & Security → Input Monitoring → enable **Hammerspoon**.
 
-### 3. Microfone (obrigatória)
+### 3. Microphone (required)
 
-**Por quê:** o `ffmpeg` grava via AVFoundation. Como o `ffmpeg` é processo filho do Hammerspoon, o macOS pede permissão **pro Hammerspoon**, não pro ffmpeg isolado.
+**Why:** `ffmpeg` records via AVFoundation. Because `ffmpeg` runs as a child process of Hammerspoon, macOS asks for permission **on Hammerspoon's behalf**, not on ffmpeg's.
 
-**Onde:** Privacidade e Segurança → Microfone → habilite **Hammerspoon**.
+**Where:** Privacy & Security → Microphone → enable **Hammerspoon**.
 
-> Se você trocar o Hammerspoon de lugar, reinstalar, ou atualizar o app — o macOS revoga e pede de novo. Normal.
+> If you move Hammerspoon, reinstall it, or upgrade the app — macOS revokes the grants and asks again. Normal.
 
-### Quando algo não funciona
+### When something doesn't work
 
-A maior parte dos problemas de "não acontece nada ao segurar a tecla" é uma dessas três permissões faltando ou revogada. Checar nessa ordem: Monitoramento de Entrada → Acessibilidade → Microfone.
+Most "nothing happens when I hold the key" reports come down to one of these three permissions being missing or revoked. Check them in this order: Input Monitoring → Accessibility → Microphone.
 
-Se suspeitar que o macOS guardou estado ruim (típico após update do sistema ou do Hammerspoon), resetar as permissões via Terminal e reconceder resolve:
+If you suspect macOS is holding bad state (common after a system update or a Hammerspoon upgrade), reset the grants from the terminal and re-authorize:
 
 ```sh
 tccutil reset Accessibility org.hammerspoon.Hammerspoon
@@ -122,24 +120,24 @@ tccutil reset ListenEvent  org.hammerspoon.Hammerspoon
 tccutil reset Microphone   org.hammerspoon.Hammerspoon
 ```
 
-Depois, abra o Hammerspoon de novo e segure a tecla — o sistema vai pedir cada permissão na sequência.
+Then relaunch Hammerspoon and hold the key — the system will re-prompt for each permission in turn.
 
-## Uso
+## Usage
 
-Segure a tecla configurada (padrão: **Right Option**), fale, solte. O texto transcrito é colado onde o cursor estiver.
+Hold the configured key (default: **Right Option**), speak, release. The transcribed text is pasted wherever your cursor is.
 
-Feedback visual:
-- **🎤 pisper** → gravação ativa
-- **⏳ transcribing…** → chamada à API em andamento
-- **✅** → sucesso, texto colado
+Visual feedback:
+- **🎤 pisper** → recording in progress
+- **⏳ transcribing…** → API call in flight
+- **✅** → success, text pasted
 
-Toque muito rápido (< 250ms) é **ignorado silenciosamente** — evita disparo acidental quando você encosta na tecla por reflexo. A duração mínima é configurável (`minDuration`).
+A very short tap (< 250ms) is **silently ignored** — that avoids an accidental trigger when you brush the key by reflex. The minimum duration is configurable (`minDuration`).
 
-## Configuração
+## Configuration
 
-### Trocar a tecla de ativação
+### Change the hotkey
 
-Em `~/.hammerspoon/init.lua`, dentro do bloco do pisper:
+In `~/.hammerspoon/init.lua`, inside the pisper block:
 
 ```lua
 pisper.init({
@@ -148,116 +146,116 @@ pisper.init({
 })
 ```
 
-KeyCodes das teclas modificadoras mais úteis:
+KeyCodes for the most useful modifier keys:
 
-| Tecla          | keyCode |
-|----------------|---------|
-| Right Option   | 61 *(padrão)* |
-| Right Command  | 54      |
-| Right Shift    | 60      |
-| Right Control  | 62      |
-| Fn (globo)     | 63      |
+| Key            | keyCode        |
+|----------------|----------------|
+| Right Option   | 61 *(default)* |
+| Right Command  | 54             |
+| Right Shift    | 60             |
+| Right Control  | 62             |
+| Fn (globe)     | 63             |
 
-> **Por que só modificadoras?** O pisper detecta hold via `flagsChanged`, que é o evento que o macOS emite quando uma tecla modificadora muda de estado. Teclas regulares (letras, F-keys, etc.) não disparam esse evento. Suporte a outras teclas exigiria um `keyDown`/`keyUp` tap, que intercepta **todo** teclado digitado — overhead que não vale.
+> **Why only modifier keys?** pisper detects the hold via `flagsChanged`, the event macOS fires when a modifier key changes state. Regular keys (letters, F-keys, etc.) don't emit that event. Supporting other keys would require a `keyDown` / `keyUp` tap that intercepts **every** keystroke — not worth the overhead.
 
-Pra descobrir o keyCode de qualquer outra modificadora, abra o Console do Hammerspoon e cole:
+To discover the keyCode of any other modifier, open the Hammerspoon Console and paste:
 
 ```lua
 hs.eventtap.new({hs.eventtap.event.types.flagsChanged}, function(e)
   print(e:getKeyCode()) end):start()
 ```
 
-Aperte a tecla e o código aparece no console.
+Press the key and the code shows up in the console.
 
-### Trocar o modelo de transcrição
+### Change the transcription model
 
-Em `~/.config/pisper/env`:
+In `~/.config/pisper/env`:
 
 ```sh
-PISPER_MODEL=gpt-4o-transcribe       # padrão, melhor qualidade
-# ou
-PISPER_MODEL=gpt-4o-mini-transcribe  # mais barato
-# ou
-PISPER_MODEL=whisper-1               # legacy, funciona
+PISPER_MODEL=gpt-4o-transcribe       # default, best quality
+# or
+PISPER_MODEL=gpt-4o-mini-transcribe  # cheaper
+# or
+PISPER_MODEL=whisper-1               # legacy, still works
 ```
 
-Qualquer endpoint compatível com `/v1/audio/transcriptions` da OpenAI deve funcionar. Pra trocar o **provider** (Groq, Whisper local via `whisper.cpp`, etc.), edite `bin/pisper-stop` — a chamada `curl` tá isolada lá.
+Any endpoint compatible with OpenAI's `/v1/audio/transcriptions` should work. To switch **provider** (Groq, local Whisper via `whisper.cpp`, etc.), edit `bin/pisper-stop` — the `curl` call is isolated there.
 
-### Trocar a duração mínima
+### Change the minimum duration
 
-Padrão: 250ms. Pra mudar:
+Default: 250ms. To change it:
 
 ```lua
 pisper.init({
   binPath = '/Users/.../pisper/bin',
-  minDuration = 0.5,  -- meio segundo
+  minDuration = 0.5,  -- half a second
 })
 ```
 
-## Custo
+## Cost
 
-`gpt-4o-transcribe` custa **~$0.006/min** de áudio transcrito. Uso típico de ditado (~10 min/dia, 20 dias úteis) ≈ **$1.20/mês**.
+`gpt-4o-transcribe` is roughly **$0.006/min** of transcribed audio. Typical dictation usage (~10 min/day, 20 business days) ≈ **$1.20/month**.
 
-`gpt-4o-mini-transcribe` é bem mais barato. `whisper-1` (legacy) também.
+`gpt-4o-mini-transcribe` is substantially cheaper. `whisper-1` (legacy) is cheaper too.
 
-Colocar limite mensal em [platform.openai.com/account/billing/limits](https://platform.openai.com/account/billing/limits) é uma boa. Dez dólares/mês de teto já é muito mais do que qualquer uso realista.
+Setting a monthly cap at [platform.openai.com/account/billing/limits](https://platform.openai.com/account/billing/limits) is a good idea. Ten dollars/month is already way more than any realistic usage.
 
 ## Troubleshooting
 
-### Hammerspoon não reage quando seguro a tecla
+### Hammerspoon doesn't react when I hold the key
 
-Na ordem:
-1. Hammerspoon tá rodando? `pgrep -x Hammerspoon` — se não retornar PID, abra: `open -a Hammerspoon`
-2. **Monitoramento de Entrada** habilitado pro Hammerspoon? (é o mais comum)
-3. **Acessibilidade** habilitado? (a gravação começa mas o paste falha)
-4. Outro app captura a mesma tecla? Teste outra tecla (ex: Right Command = keyCode 54)
-5. Console do Hammerspoon (menu da barra → Console) mostra erro?
+In order:
+1. Is Hammerspoon running? `pgrep -x Hammerspoon` — if it doesn't return a PID, launch it: `open -a Hammerspoon`
+2. Is **Input Monitoring** enabled for Hammerspoon? (most common cause)
+3. Is **Accessibility** enabled? (recording starts but the paste fails)
+4. Is another app capturing the same key? Try a different one (e.g. Right Command = keyCode 54)
+5. Does the Hammerspoon Console (menu bar → Console) show an error?
 
-### ffmpeg não grava / "Input/output error"
+### ffmpeg doesn't record / "Input/output error"
 
-- **Microfone** habilitado pro Hammerspoon?
-- Teste manual no terminal:
+- Is **Microphone** enabled for Hammerspoon?
+- Test manually in the terminal:
   ```sh
   ffmpeg -f avfoundation -i ":default" -t 2 /tmp/test.wav && afplay /tmp/test.wav
   ```
-- Se você tem múltiplos inputs (mic externo, interface de áudio), o `:default` pode não ser o certo. Listar dispositivos:
+- If you have multiple inputs (external mic, audio interface), `:default` may not be the right one. List devices:
   ```sh
   ffmpeg -f avfoundation -list_devices true -i ""
   ```
-  E editar `bin/pisper-record` pra apontar pro índice certo (ex: `-i ":1"`).
+  Then edit `bin/pisper-record` to point at the right index (e.g. `-i ":1"`).
 
-### Transcrição vem em inglês quando falo português (ou vice-versa)
+### Transcription comes back in English when I spoke Portuguese (or vice versa)
 
-`gpt-4o-transcribe` detecta idioma automaticamente, mas em áudios curtos ou com ruído pode errar. Solução: force o idioma via parâmetro `language` na chamada curl em `bin/pisper-stop`:
+`gpt-4o-transcribe` detects the language automatically, but it can guess wrong on short or noisy audio. Fix: force the language via the `language` parameter in the `curl` call inside `bin/pisper-stop`:
 
 ```sh
   -F "language=pt" \
 ```
 
-### Cmd+V não cola em app específico
+### Cmd+V doesn't paste in a specific app
 
-Alguns apps (jogos full-screen, apps que implementam paste custom via eventos próprios) ignoram o synthetic keystroke. Fallback: o texto **já está no clipboard** — `Cmd+V` manual cola normal.
+Some apps (full-screen games, apps that implement paste via their own custom events) ignore the synthetic keystroke. Fallback: the text **is already in the clipboard** — a manual `Cmd+V` pastes normally.
 
-### Quota exceeded / 429 da OpenAI
+### Quota exceeded / 429 from OpenAI
 
-Ver em [platform.openai.com/usage](https://platform.openai.com/usage). Se for limite que você colocou, suba o cap; se for rate limit do tier, espera uns minutos.
+Check [platform.openai.com/usage](https://platform.openai.com/usage). If it's your own cap, raise it; if it's a tier rate limit, wait a few minutes.
 
-### Reinstalar do zero
+### Reinstall from scratch
 
 ```sh
-# Remove o bloco pisper do init.lua manualmente
-# (entre -- pisper: BEGIN e -- pisper: END)
+# Manually remove the pisper block from init.lua
+# (between -- pisper: BEGIN and -- pisper: END)
 
-# Limpa config e temp
+# Clean config and temp
 rm -rf ~/.config/pisper
 rm -rf "${TMPDIR:-/tmp}/pisper"
 
-# Reseta permissões se quiser
+# Reset permissions if you want
 tccutil reset Accessibility org.hammerspoon.Hammerspoon
 tccutil reset ListenEvent  org.hammerspoon.Hammerspoon
 tccutil reset Microphone   org.hammerspoon.Hammerspoon
 
-# Reinstala
+# Reinstall
 cd ~/workspace/virtuware/pisper
 ./install.sh
 ```
@@ -267,41 +265,41 @@ cd ~/workspace/virtuware/pisper
 ```
 pisper/
 ├── bin/
-│   ├── pisper-record    # inicia gravação via ffmpeg em background
-│   ├── pisper-stop      # encerra ffmpeg, transcreve, cola
-│   └── pisper-cancel    # aborta gravação sem transcrever
+│   ├── pisper-record    # spawns ffmpeg in the background to record
+│   ├── pisper-stop      # ends ffmpeg, transcribes, pastes
+│   └── pisper-cancel    # aborts a recording without transcribing
 ├── hammerspoon/
-│   └── pisper.lua       # módulo que detecta hold e invoca os scripts
-├── install.sh           # integra ao ~/.hammerspoon/init.lua
-├── .env.example         # template do ~/.config/pisper/env
+│   └── pisper.lua       # module that detects the hold and invokes the scripts
+├── install.sh           # wires pisper into ~/.hammerspoon/init.lua
+├── .env.example         # template for ~/.config/pisper/env
 └── README.md
 ```
 
-## Segurança
+## Security
 
-- `~/.config/pisper/env` é criado com `chmod 600` pelo `install.sh`
-- `$TMPDIR` do macOS (usado pros WAVs temporários) já é per-user, não é `/tmp` compartilhado
-- PID files, áudio e logs temporários ficam em `$TMPDIR/pisper/` com `umask 077`
-- O último áudio enviado é guardado em `$TMPDIR/pisper/last.wav` pra debug — é sobrescrito a cada sessão. Se isso te incomoda, comenta a linha `cp "$AUDIO_FILE" "$PISPER_TMP/last.wav"` em `bin/pisper-stop`.
-- A chave da OpenAI **nunca sai da sua máquina** exceto pro endpoint da OpenAI (via HTTPS). Nenhum proxy, nenhum telemetry.
+- `~/.config/pisper/env` is created with `chmod 600` by `install.sh`
+- macOS's `$TMPDIR` (used for the temporary WAVs) is already per-user — it's not shared `/tmp`
+- PID files, audio, and temporary logs live in `$TMPDIR/pisper/` with `umask 077`
+- The last audio sent to the API is kept in `$TMPDIR/pisper/last.wav` for debugging — overwritten each session. If that bothers you, comment out the `cp "$AUDIO_FILE" "$PISPER_TMP/last.wav"` line in `bin/pisper-stop`.
+- The OpenAI auth header goes to curl via a `chmod 600` file (`-H "@file"`) so the token never reaches `argv`, where other local processes could read it with `ps`.
+- Your OpenAI key **never leaves your machine** except to go to OpenAI's endpoint over HTTPS. No proxy, no telemetry.
 
 ## Roadmap
 
-- [ ] Demo GIF no README
-- [ ] Windows (global hotkey + captura de mic + paste) — provavelmente AutoHotkey ou app em Rust/Go
+- [ ] Windows (global hotkey + mic capture + paste) — likely AutoHotkey or a Rust/Go app
 - [ ] Linux (evdev + `parecord`/`arecord` + `xdotool`/`wtype`)
-- [ ] Suporte nativo a Whisper local (sem API) via `whisper.cpp`
-- [ ] Pós-processamento opcional com LLM (limpar "é", "tipo", formatar pra contexto)
+- [ ] Native support for local Whisper (no API) via `whisper.cpp`
+- [ ] Optional LLM post-processing (clean up filler words, reformat for the target context)
 
-Contribuições são bem-vindas. Abra uma issue antes de atacar algo grande pra alinharmos escopo.
+Contributions are welcome. Open an issue before tackling anything large so we can align on scope.
 
-## Licença
+## License
 
-MIT — se ainda não tem `LICENSE` no repo, adicionar um arquivo MIT padrão resolve.
+MIT — see [LICENSE](./LICENSE).
 
-## Créditos
+## Credits
 
-Construído em cima de gente muito mais inteligente:
-- [Hammerspoon](https://www.hammerspoon.org/) — toda a mágica de hook global
-- [ffmpeg](https://ffmpeg.org/) — captura de áudio
-- [OpenAI](https://platform.openai.com/docs/guides/speech-to-text) — transcrição
+Built on top of people much smarter than me:
+- [Hammerspoon](https://www.hammerspoon.org/) — all the global-hook magic
+- [ffmpeg](https://ffmpeg.org/) — audio capture
+- [OpenAI](https://platform.openai.com/docs/guides/speech-to-text) — transcription

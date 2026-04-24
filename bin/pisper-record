@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# pisper-record: inicia gravação do mic em background via ffmpeg/AVFoundation.
-# Chamado pelo Hammerspoon on keyDown do atalho configurado.
-# Uso: pisper-record <session_id>
+# pisper-record: starts background mic capture via ffmpeg/AVFoundation.
+# Called by Hammerspoon on keyDown of the configured hotkey.
+# Usage: pisper-record <session_id>
 set -euo pipefail
 umask 077
 
@@ -10,11 +10,11 @@ export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
 SESSION="${1:-default}"
-# Remove qualquer char suspeito no session id (defensivo — só alfanum+dash).
+# Strip anything suspicious from the session id (defensive — alnum + dash only).
 SESSION="${SESSION//[^A-Za-z0-9_-]/}"
 [[ -z "$SESSION" ]] && SESSION="default"
 
-# $TMPDIR no macOS já é per-user — evita exposição em /tmp compartilhado.
+# $TMPDIR on macOS is already per-user — avoids exposure in a shared /tmp.
 PISPER_TMP="${TMPDIR:-/tmp}/pisper"
 mkdir -m 700 -p "$PISPER_TMP"
 
@@ -30,7 +30,8 @@ ffmpeg -hide_banner -loglevel error \
   </dev/null >"$LOG_FILE" 2>&1 &
 FFMPEG_PID=$!
 
-# Valida que ffmpeg subiu — sem isso, falha de mic deixa estado Lua inconsistente.
+# Verify ffmpeg actually launched — without this, a mic failure leaves the Lua
+# state machine stuck in "recording" with no process to stop.
 sleep 0.15
 if ! kill -0 "$FFMPEG_PID" 2>/dev/null; then
   rm -f "$AUDIO_FILE"
@@ -39,10 +40,11 @@ if ! kill -0 "$FFMPEG_PID" 2>/dev/null; then
   exit 1
 fi
 
-# Fingerprint do processo pra resistir a PID recycling. `lstart` é o timestamp
-# de início do processo — o kernel nunca reatribui um PID com mesmo lstart,
-# então (PID, lstart) identifica unicamente esta instância. LC_ALL=C trava o
-# formato da data, caso contrário varia com locale. awk normaliza espaços.
+# Fingerprint the process to resist PID recycling. `lstart` is the process
+# start timestamp — the kernel never reassigns a PID with the same lstart, so
+# (PID, lstart) uniquely identifies this specific ffmpeg instance. LC_ALL=C
+# pins the date format (otherwise it varies by locale). awk collapses runs
+# of whitespace so comparisons are stable.
 FINGERPRINT=$(LC_ALL=C ps -p "$FFMPEG_PID" -o lstart= 2>/dev/null | awk '{$1=$1; print}')
 if [[ -z "$FINGERPRINT" ]]; then
   kill -KILL "$FFMPEG_PID" 2>/dev/null || true
@@ -51,8 +53,8 @@ if [[ -z "$FINGERPRINT" ]]; then
   exit 1
 fi
 
-# Escrita atômica — rename só depois que o arquivo final tá completo. Leitor
-# nunca vê pid-file com só o PID e fingerprint faltando.
+# Atomic write — rename only after the final file is complete. A reader never
+# sees a pid-file that contains only the PID with the fingerprint missing.
 TMP_PID_FILE="$PID_FILE.new"
 printf '%s\n%s\n' "$FFMPEG_PID" "$FINGERPRINT" > "$TMP_PID_FILE"
 mv "$TMP_PID_FILE" "$PID_FILE"
