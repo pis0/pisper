@@ -53,7 +53,7 @@ if [[ ! -f "$CONFIG_ENV" ]]; then
 else
   ok "config exists at $CONFIG_ENV"
 fi
-# Sempre reforça chmod — se o arquivo existia com permissão aberta, a key estava exposta.
+# Always reassert chmod — if the file already existed with a loose mode, the key was exposed.
 chmod 600 "$CONFIG_ENV"
 
 # 4. hook into Hammerspoon init.lua
