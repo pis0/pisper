@@ -66,14 +66,27 @@ marker_end="-- pisper: END (auto)"
 if grep -q "$marker_begin" "$HS_INIT" 2>/dev/null; then
   ok "pisper already registered in $HS_INIT"
 else
-  # Usa long bracket [===[...]===] pra string Lua — não interpreta aspas/escapes no path.
+  # Embed $PISPER_DIR as a Lua double-quoted string with proper escaping.
+  # Long-bracket literals ([===[...]===]) looked safer but are defeated by a
+  # path containing the matching closing delimiter — an attacker-controlled
+  # clone target could break out of the literal and inject arbitrary Lua that
+  # runs inside Hammerspoon. Double-quoted Lua strings with backslash/quote
+  # escaping remove that class of attack entirely.
+  lua_dq_escape() {
+    local s="$1"
+    s="${s//\\/\\\\}"   # \  -> \\
+    s="${s//\"/\\\"}"   # "  -> \"
+    printf '%s' "$s"
+  }
+
+  escaped_dir=$(lua_dq_escape "$PISPER_DIR")
   {
     echo ""
     echo "$marker_begin"
-    echo "package.path = package.path .. [===[;$PISPER_DIR/hammerspoon/?.lua]===]"
+    echo "package.path = package.path .. \";${escaped_dir}/hammerspoon/?.lua\""
     echo "local pisper = require('pisper')"
     echo "pisper.init({"
-    echo "  binPath = [===[$PISPER_DIR/bin]===],"
+    echo "  binPath = \"${escaped_dir}/bin\","
     echo "  -- default keyCode: 61 (Right Option). See pisper.lua for other options."
     echo "})"
     echo "$marker_end"
