@@ -74,8 +74,12 @@ else
   # escaping remove that class of attack entirely.
   lua_dq_escape() {
     local s="$1"
-    s="${s//\\/\\\\}"   # \  -> \\
-    s="${s//\"/\\\"}"   # "  -> \"
+    s="${s//\\/\\\\}"         # \  -> \\
+    s="${s//\"/\\\"}"         # "  -> \"
+    s="${s//$'\n'/\\n}"       # LF -> \n  (literal newlines in a double-quoted
+    s="${s//$'\r'/\\r}"       # CR -> \r   Lua string split it into two lines,
+                              # which would let a crafted path with \n + Lua
+                              # payload inject statements onto the next line.
     printf '%s' "$s"
   }
 
