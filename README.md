@@ -181,6 +181,19 @@ PISPER_MODEL=whisper-1               # legacy, still works
 
 Any endpoint compatible with OpenAI's `/v1/audio/transcriptions` should work. To switch **provider** (Groq, local Whisper via `whisper.cpp`, etc.), edit `bin/pisper-stop` — the `curl` call is isolated there.
 
+### Force the transcription language
+
+By default, `gpt-4o-transcribe` auto-detects the language. On short or noisy audio it can occasionally misidentify — a Portuguese clip coming back transcribed as Spanish, or an English phrase getting translated instead of transcribed. To pin the language, set `PISPER_LANGUAGE` in `~/.config/pisper/env`:
+
+```sh
+PISPER_LANGUAGE=pt   # Portuguese
+# or
+PISPER_LANGUAGE=en   # English
+# or any other ISO-639-1 code the model supports
+```
+
+Leave it unset to auto-detect. Full list of codes: [ISO 639-1](https://en.wikipedia.org/wiki/List_of_ISO_639_language_codes).
+
 ### Change the minimum duration
 
 Default: 250ms. To change it:
@@ -226,11 +239,7 @@ In order:
 
 ### Transcription comes back in English when I spoke Portuguese (or vice versa)
 
-`gpt-4o-transcribe` detects the language automatically, but it can guess wrong on short or noisy audio. Fix: force the language via the `language` parameter in the `curl` call inside `bin/pisper-stop`:
-
-```sh
-  -F "language=pt" \
-```
+`gpt-4o-transcribe` detects the language automatically, but it can guess wrong on short or noisy audio. Pin the language via `PISPER_LANGUAGE` in `~/.config/pisper/env` — see [Force the transcription language](#force-the-transcription-language) above.
 
 ### Cmd+V doesn't paste in a specific app
 
