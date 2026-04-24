@@ -138,6 +138,14 @@ HEADER_FILE=$(mktemp "$PISPER_TMP/auth-$SESSION.XXXXXX")
 chmod 600 "$HEADER_FILE"
 printf 'Authorization: Bearer %s\n' "$OPENAI_API_KEY" > "$HEADER_FILE"
 
+# Optional: pin the transcription language (ISO-639-1) instead of auto-detect.
+# Prevents occasional wrong-language guesses on short or noisy audio. If unset,
+# the model decides. Using an array avoids sending an empty -F pair to curl.
+extra_args=()
+if [[ -n "${PISPER_LANGUAGE:-}" ]]; then
+  extra_args+=(-F "language=$PISPER_LANGUAGE")
+fi
+
 # Capture HTTP status separately so we can surface specific failures
 # (quota, auth, rate limit) instead of a generic "API request failed".
 curl_exit=0
@@ -147,7 +155,8 @@ http_response=$(curl -sS --max-time 60 \
   -H "@$HEADER_FILE" \
   -F "model=$MODEL" \
   -F "file=@$AUDIO_FILE" \
-  -F "response_format=json" 2>/dev/null) || curl_exit=$?
+  -F "response_format=json" \
+  "${extra_args[@]}" 2>/dev/null) || curl_exit=$?
 
 if (( curl_exit != 0 )); then
   case "$curl_exit" in
