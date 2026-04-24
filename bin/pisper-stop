@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# pisper-stop: encerra gravação da sessão, transcreve via OpenAI, cola no app em foco.
-# Chamado pelo Hammerspoon on keyUp do atalho configurado.
-# Uso: pisper-stop <session_id>
+# pisper-stop: ends the session's recording, transcribes via OpenAI, pastes into the focused app.
+# Called by Hammerspoon on keyUp of the configured hotkey.
+# Usage: pisper-stop <session_id>
 set -euo pipefail
 umask 077
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:$PATH"
 
-# Força UTF-8 — sem isso, pbcopy interpreta bytes UTF-8 como MacRoman e corrompe acentos.
+# Force UTF-8 — without it pbcopy reads UTF-8 bytes as MacRoman and corrupts accents.
 export LANG="en_US.UTF-8"
 export LC_ALL="en_US.UTF-8"
 
@@ -23,19 +23,20 @@ PID_FILE="$PISPER_TMP/ffmpeg-$SESSION.pid"
 ENV_FILE="${PISPER_ENV_FILE:-$HOME/.config/pisper/env}"
 MODEL="${PISPER_MODEL:-gpt-4o-transcribe}"
 
-# Arquivo com o header de auth — nunca colocamos o token em argv, onde outros
-# processos poderiam ler via `ps auxww`.
+# File holding the auth header — we never put the token in argv, where other
+# processes could read it via `ps auxww`.
 HEADER_FILE=""
 
 log_err() { echo "[pisper] $*" >&2; }
 
-# Remove ambos — AUDIO_FILE pode ter sido reatribuído pra TRIMMED depois, então bruto ficaria.
+# Remove both — AUDIO_FILE may have been reassigned to TRIMMED later, so the raw
+# copy would otherwise leak.
 cleanup() { rm -f "$RAW_AUDIO" "$TRIMMED" "${HEADER_FILE:-}"; }
 trap cleanup EXIT
 
-# Stop pode rodar antes de pisper-record escrever o PID (race em hold curto).
-# pisper-record só publica o pid-file depois de validar ffmpeg + capturar
-# fingerprint (~200ms), então damos margem de 500ms.
+# Stop can fire before pisper-record has written the pid-file (race on short hold).
+# pisper-record only publishes the pid-file after validating ffmpeg and capturing
+# the fingerprint (~200ms), so we allow up to 500ms here.
 for _ in 1 2 3 4 5 6 7 8 9 10; do
   [[ -f "$PID_FILE" ]] && break
   sleep 0.05
@@ -43,15 +44,15 @@ done
 
 pid=""
 if [[ -f "$PID_FILE" ]]; then
-  # Formato: linha 1 = PID, linha 2 = fingerprint (lstart do ps).
+  # Format: line 1 = PID, line 2 = fingerprint (ps lstart=).
   saved_pid=""; saved_fp=""
   { read -r saved_pid; read -r saved_fp; } < "$PID_FILE" 2>/dev/null || true
   rm -f "$PID_FILE"
 
-  # Só confia que é nosso ffmpeg se PID vive E fingerprint bate. Previne
-  # matar um ffmpeg de outro processo que tenha herdado o PID reciclado.
-  # Pid-files sem fingerprint (arquivos de versão antiga ou parciais) são
-  # tratados como stale — conservador.
+  # Only trust it's our ffmpeg if the PID is alive AND the fingerprint matches.
+  # Prevents signaling an unrelated ffmpeg that inherited a recycled PID.
+  # Pid-files without a fingerprint line (older format or partial writes) are
+  # treated as stale — the conservative choice.
   if [[ -n "$saved_pid" ]] && [[ -n "$saved_fp" ]]; then
     current_fp=$(LC_ALL=C ps -p "$saved_pid" -o lstart= 2>/dev/null | awk '{$1=$1; print}')
     current_comm=$(ps -p "$saved_pid" -o comm= 2>/dev/null)
@@ -61,10 +62,10 @@ if [[ -f "$PID_FILE" ]]; then
   fi
 fi
 
-# Fallback: pid-file atrasou além dos 500ms de espera (sistema sob carga) ou
-# pisper-record crashou antes de publicar. Sem isso, ffmpeg continuaria gravando
-# mic orfão. Localiza pelo argv — matching estrito pelo path exato do wav desta
-# sessão evita colisão com ffmpegs alheios.
+# Fallback: pid-file was delayed past the 500ms wait (system under load) or
+# pisper-record crashed before publishing. Without this, ffmpeg could keep
+# recording the mic as an orphan. Find it via argv — strict match on the exact
+# wav path for this session to avoid touching unrelated ffmpegs.
 if [[ -z "$pid" ]]; then
   while read -r candidate; do
     [[ -n "$candidate" ]] || continue
@@ -90,7 +91,7 @@ if [[ -n "$pid" ]]; then
       sleep 0.05
     done
   fi
-  # Último recurso: SIGKILL. Nunca transcrever wav enquanto ffmpeg pode estar escrevendo.
+  # Last resort: SIGKILL. Never transcribe the wav while ffmpeg might still be writing to it.
   if kill -0 "$pid" 2>/dev/null; then
     kill -KILL "$pid" 2>/dev/null || true
     sleep 0.1
@@ -106,15 +107,15 @@ if [[ ! -s "$AUDIO_FILE" ]]; then
   exit 1
 fi
 
-# gpt-4o-transcribe às vezes encerra a transcrição em silêncios longos.
-# Colapsa silêncios > 700ms abaixo de -35dB antes de enviar.
+# gpt-4o-transcribe sometimes ends transcription early on long silences.
+# Collapse silences > 700ms below -35dB before sending.
 if ffmpeg -hide_banner -loglevel error -y -i "$AUDIO_FILE" \
   -af "silenceremove=stop_periods=-1:stop_duration=0.7:stop_threshold=-35dB" \
   "$TRIMMED" 2>/dev/null && [[ -s "$TRIMMED" ]]; then
   AUDIO_FILE="$TRIMMED"
 fi
 
-# Mantém uma cópia do último áudio enviado pra inspeção/debug (sobrescreve a cada sessão).
+# Keep a copy of the last audio sent for inspection/debugging (overwritten each session).
 cp "$AUDIO_FILE" "$PISPER_TMP/last.wav" 2>/dev/null || true
 
 if [[ ! -f "$ENV_FILE" ]]; then
@@ -130,9 +131,9 @@ if [[ -z "${OPENAI_API_KEY:-}" ]]; then
   exit 1
 fi
 
-# Escreve o header de auth num arquivo chmod 600 em $TMPDIR (per-user).
-# curl -H "@file" lê a linha de header do arquivo, mantendo o token fora de argv.
-# Requer curl 7.55+ (macOS 10.14+ já atende).
+# Write the auth header to a chmod-600 file in $TMPDIR (per-user).
+# curl -H "@file" reads the header line from the file, keeping the token out of argv.
+# Requires curl 7.55+ (macOS 10.14+ already ships with it).
 HEADER_FILE=$(mktemp "$PISPER_TMP/auth-$SESSION.XXXXXX")
 chmod 600 "$HEADER_FILE"
 printf 'Authorization: Bearer %s\n' "$OPENAI_API_KEY" > "$HEADER_FILE"

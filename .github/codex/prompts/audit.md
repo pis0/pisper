@@ -1,104 +1,104 @@
-Você é um auditor sênior fazendo a **primeira auditoria completa** do **pisper** — ferramenta pessoal de voice-to-text global pra macOS.
+You are a senior auditor running the **first full audit** of **pisper** — a personal global voice-to-text tool for macOS.
 
-Esta NÃO é uma code review de diff. Varra **todos os arquivos do repositório** (exceto `.git/`, `.github/`, e artefatos gerados). Analise o projeto como se tivesse acabado de herdá-lo e quisesse saber em que estado está antes de apertar o play em produção.
+This is NOT a diff-scoped code review. Sweep **every file in the repository** (except `.git/`, `.github/`, and generated artifacts). Treat the project as if you had just inherited it and wanted to know the shape it is in before turning it on for real daily use.
 
-## O que o pisper é
+## What pisper is
 
-Hold-to-talk global pra macOS: usuário segura uma tecla modificadora (Right Option por padrão), fala, solta, e o texto transcrito é colado no app em foco via `Cmd+V`.
+Global hold-to-talk for macOS: the user holds a modifier key (Right Option by default), speaks, releases, and the transcribed text is pasted into the focused app via `Cmd+V`.
 
 ```
-Hammerspoon (daemon macOS, Lua)
-    └─ eventtap de flagsChanged detecta hold do keyCode configurado
-        ├─ keyDown  → hs.task.new → bin/pisper-record   (ffmpeg AVFoundation → wav 16kHz mono)
+Hammerspoon (macOS daemon, Lua)
+    └─ flagsChanged eventtap detects hold of the configured keyCode
+        ├─ keyDown  → hs.task.new → bin/pisper-record   (ffmpeg AVFoundation → 16kHz mono wav)
         ├─ keyUp    → hs.task.new → bin/pisper-stop     (kill ffmpeg → silence-remove → OpenAI /v1/audio/transcriptions → pbcopy → osascript Cmd+V)
-        └─ click curto (< minDuration) → hs.task.new → bin/pisper-cancel (kill ffmpeg + rm wav)
+        └─ short click (< minDuration) → hs.task.new → bin/pisper-cancel (kill ffmpeg + rm wav)
 ```
 
 Stack:
-- **Lua** em `hammerspoon/pisper.lua` — state machine do hold-to-talk, alerts, spawn async
-- **Bash** em `bin/pisper-{record,stop,cancel}` — todos com `set -euo pipefail`
-- **ffmpeg** via `-f avfoundation -i ":default"`; `silenceremove` antes de enviar pra API
-- **OpenAI API** — `gpt-4o-transcribe` (configurável) em `POST /v1/audio/transcriptions`. API key em `~/.config/pisper/env` (chmod 600)
-- **pbcopy + osascript** pra colar (LANG/LC_ALL forçados pra UTF-8)
-- **install.sh** — injeta bloco marker-delimitado em `~/.hammerspoon/init.lua`
+- **Lua** in `hammerspoon/pisper.lua` — hold-to-talk state machine, alerts, async spawn
+- **Bash** in `bin/pisper-{record,stop,cancel}` — all with `set -euo pipefail`
+- **ffmpeg** via `-f avfoundation -i ":default"`; `silenceremove` before the API call
+- **OpenAI API** — `gpt-4o-transcribe` (configurable) at `POST /v1/audio/transcriptions`. API key in `~/.config/pisper/env` (chmod 600)
+- **pbcopy + osascript** for the paste (LANG/LC_ALL forced to UTF-8)
+- **install.sh** — writes a marker-delimited block into `~/.hammerspoon/init.lua`
 
-Estado runtime em `/tmp/pisper/`.
+Runtime state lives in `$TMPDIR/pisper/` (per-user).
 
-## Escopo da auditoria
+## Audit scope
 
-Quero um retrato honesto do projeto nas seguintes dimensões. **Priorize por impacto real.** Não invente problema só pra preencher finding; se uma dimensão estiver sólida, diga isso no `overall_explanation`.
+I want an honest picture of the project across the following dimensions. **Prioritize by real impact.** Don't invent problems just to fill a finding slot; if a dimension is solid, say so in `overall_explanation`.
 
-### 1. Segurança
+### 1. Security
 
-- **Shell injection & quoting**: todo arg interpolado em shell tem aspas duplas? Paths com espaços/aspas/`$` quebram? `$PISPER_DIR` no `install.sh` vem de dirname do clone — se o user clona em path exótico, o bloco injetado em `init.lua` vira Lua inválido ou pior.
-- **API key leak**: `OPENAI_API_KEY` pode vazar via stderr/stdout/log? O `log_err "API request failed: $response"` em `pisper-stop` — se o curl ecoa headers de erro, a key pode aparecer. `set -x` em debug vazaria? Env file com chmod 600 é suficiente?
-- **osascript injection**: hoje `Cmd+V` é hardcoded (seguro). Algum caminho que interpola string user-controlled em AppleScript?
-- **PID file sem dono**: `kill "$old_pid"` após `cat` do pid file — race entre `kill -0` check e o `kill` real. Em pior caso, mata processo alheio do sistema com pid reciclado.
-- **Tempfile em `/tmp/pisper`**: path fixo, readable por outros users. Se for multi-user ou se `/tmp` for um share, áudio do mic fica exposto. `$TMPDIR` ou `mktemp -d` seria mais seguro.
-- **`source "$ENV_FILE"`**: qualquer código shell arbitrário no env file é executado. Se o install/update jamais pegar env file de origem não-confiável, tudo bem — confirmar que não há esse path.
-- **curl sem timeout**: requisição pode travar indefinidamente sem `--max-time`. Não é security crítico mas é robustez.
+- **Shell injection & quoting**: is every interpolated shell arg double-quoted? Do paths containing spaces, quotes, or `$` break anything? `$PISPER_DIR` in `install.sh` is derived from the clone directory — if the user clones into an exotic path, does the injected `init.lua` block become invalid Lua or worse?
+- **API key leaks**: can `OPENAI_API_KEY` leak via stderr, stdout, or logs? The `log_err` call in `pisper-stop` — if curl echoes error headers, can the key show up? Would `set -x` during debugging leak it? Is the chmod 600 on the env file sufficient?
+- **osascript injection**: today `Cmd+V` is hardcoded (safe). Is there any path where a user-controlled string gets interpolated into AppleScript?
+- **PID file without identity check**: `kill "$old_pid"` after reading a pid file — race between the `kill -0` probe and the real `kill`. Worst case, we signal an unrelated system process with a recycled PID. Current mitigation uses `ps -o lstart=` fingerprint plus argv match — only flag a real bypass.
+- **Temp files in `$TMPDIR/pisper/`**: per-user, umask 077. Good. Is there any code path that writes audio or secrets outside that directory?
+- **`source "$ENV_FILE"`**: arbitrary shell code in the env file is executed. Is there any path where an env file of untrusted origin could be installed or updated?
+- **curl without timeout**: a request could hang indefinitely without `--max-time`. Not security-critical but a robustness concern.
 
-### 2. Correção — bugs funcionais
+### 2. Functional correctness
 
-- **State machine do hold-to-talk** em `pisper.lua`:
-  - ffmpeg falha em `startRecording` — `isRecording=true` já foi setado, keyUp ainda dispara `pisper-stop` sobre arquivo inexistente.
-  - Dois `keyDown` consecutivos (bug macOS / teclado).
-  - Hammerspoon reload no meio de gravação — PID órfão em `/tmp/pisper/ffmpeg.pid`.
-  - `hs.task` callback tardio executando depois que user já iniciou nova gravação.
-- **Races nos bash scripts**:
-  - `pisper-record` e `pisper-stop` concorrentes se user holdar+soltar rápido.
-  - `sleep 0.1` após `kill` em `pisper-record` — ffmpeg pode ainda segurar o wav.
-  - `pisper-stop` espera até 500ms pra ffmpeg finalizar (`SIGINT` → 10x50ms → `SIGTERM`). Em mic lento, pode não bastar.
-- **Empty / malformed API response**: `jq '.text // empty'` cai pra vazio, mas `response` inteiro vai pra `log_err` se a API retornar `{"error": {...}}` — aceitável?
-- **`silenceremove` produz arquivo vazio**: fallback `[[ -s "$TRIMMED" ]]` cobre isso? Ffmpeg exit 0 + arquivo vazio é plausível?
-- **keyCode vs flag mapping** em `pisper.lua` (linhas 85-88): se usuário configura keyCode não mapeado (ex: 80 = F19), cai no default `isDown = flags.alt == true` — que só é true se Option tá apertado. F19 provavelmente nunca reporta alt=true, então gravação nunca inicia. Bug latente.
-- **`recordingStartedAt = nil` edge**: `stopRecording` com `recordingStartedAt` nil faz `secondsSinceEpoch() - 0 = número gigante` — passa minDuration, vai pra transcribing. Só acontece se `isRecording` for true sem startedAt setado — teoricamente impossível, mas confirmar.
+- **Hold-to-talk state machine** in `pisper.lua`:
+  - ffmpeg fails inside `startRecording` — does state get rolled back correctly?
+  - Two consecutive `keyDown` events (macOS or keyboard glitch).
+  - Hammerspoon reload mid-recording — is any ffmpeg orphan cleaned up?
+  - Late `hs.task` callback firing after the user already started a new session.
+- **Bash script races**:
+  - `pisper-record` and `pisper-stop` running concurrently on a fast hold+release.
+  - The `sleep 0.1` after `kill` — could ffmpeg still hold the wav?
+  - `pisper-stop` waits up to 500ms for ffmpeg to finalize (`SIGINT` → 10x50ms → `SIGTERM`). On a slow mic, is that enough?
+- **Empty / malformed API response**: `jq '.text // empty'` falls to empty, but does the entire `response` get echoed into `log_err` if the API returns `{"error": {...}}`? Is that acceptable?
+- **`silenceremove` produces an empty file**: does the `[[ -s "$TRIMMED" ]]` fallback cover that? Is `ffmpeg exit 0 + empty file` plausible?
+- **keyCode vs flag mapping** in `pisper.lua`: if the user configures an unmapped keyCode, is the fallback behavior sensible or will the recording never start?
+- **`recordingStartedAt = nil` edge case**: could `stopRecording` ever run with `recordingStartedAt` nil, producing a huge `elapsed` that bypasses `minDuration`?
 
-### 3. Robustez macOS
+### 3. macOS robustness
 
-- **Permissões TCC** (Accessibility, Input Monitoring, Microphone): sem elas, silent fails. UX de onboarding lida com isso? `install.sh` apenas imprime aviso — suficiente?
-- **Dispositivo de áudio trocando durante gravação** (Bluetooth desconectando, etc): ffmpeg pode travar.
-- **PATH em shell não-interativo**: Hammerspoon spawna shell sem `.zshrc`. Todo script exporta PATH com brew paths (ARM + Intel). OK hoje, mas qualquer dep nova precisa disso.
-- **UTF-8**: `LANG/LC_ALL=en_US.UTF-8` no `pisper-stop` é obrigatório antes de `pbcopy`. `pisper-record` também tem (p/ consistência), mas `pisper-cancel` não — problema?
-- **ARM vs Intel**: ambos `/opt/homebrew/bin` e `/usr/local/bin` no PATH — OK.
-- **macOS versions**: Hammerspoon 1.x, `hs.eventtap`, `hs.task` — quais versões do macOS cobertas? install.sh não checa.
+- **TCC permissions** (Accessibility, Input Monitoring, Microphone): without them, the app silently fails. Does the onboarding UX cover this? `install.sh` only prints a note — is that enough?
+- **Audio device switching mid-recording** (Bluetooth disconnect, etc): can ffmpeg hang?
+- **PATH in non-interactive shells**: Hammerspoon spawns shells without `.zshrc`. Every script exports PATH with brew paths (ARM + Intel). OK today, but any new dependency would need this too.
+- **UTF-8**: `LANG/LC_ALL=en_US.UTF-8` in `pisper-stop` is mandatory before `pbcopy`. `pisper-record` has it (for consistency), `pisper-cancel` does not — does that matter?
+- **ARM vs Intel**: both `/opt/homebrew/bin` and `/usr/local/bin` in PATH — OK.
+- **macOS versions**: Hammerspoon 1.x, `hs.eventtap`, `hs.task` — which macOS versions are supported? `install.sh` doesn't check.
 
-### 4. Código / estrutura
+### 4. Code / structure
 
-- **`pisper.lua`** — módulo singleton (`local M = {}`); `init` é idempotente se chamado duas vezes? Vaza eventtap antigo?
-- **Assinatura de callbacks `hs.task.new`**: `function(exitCode, stdout, stderr)` — stdout/stderr podem vir nil? (checado no código — bem feito).
-- **Bash scripts**: duplicação de `export PATH`/`LANG` em cada script — extrair pra `bin/_common.sh` seria mais limpo, mas adiciona complexidade. Julgue trade-off.
-- **Nomes de env vars**: `PISPER_TMP`, `PISPER_ENV_FILE`, `PISPER_MODEL` — consistente, bom.
-- **Dead code / unused**: algo no repo que não é referenciado por nada?
+- **`pisper.lua`** — singleton module (`local M = {}`); is `init` idempotent if called twice? Does it leak the old eventtap?
+- **`hs.task.new` callback signature**: `function(exitCode, stdout, stderr)` — can stdout/stderr arrive as nil? (checked in the code — handled.)
+- **Bash scripts**: duplicated `export PATH` / `LANG` across scripts — extracting a `bin/_common.sh` would be cleaner but adds complexity. Judge the trade-off.
+- **Env var names**: `PISPER_TMP`, `PISPER_ENV_FILE`, `PISPER_MODEL` — consistent, good.
+- **Dead code / unused**: anything in the repo that is not referenced by anything else?
 
 ### 5. UX
 
-- **Alerts do `hs.alert`**: `closeAll` antes de cada alert evita empilhar, mas também apaga alert de outro script que usa Hammerspoon. Conflito com outros módulos do user?
-- **Mensagens de erro**: acionáveis (dizem o que fazer) ou genéricas?
-- **Click muito curto (< 250ms)** cancela silencioso — bom padrão.
-- **`README.md`**: completo, troubleshooting cobre casos reais?
+- **`hs.alert` alerts**: `closeAll` before every alert avoids stacking, but it also wipes out any alert coming from another Hammerspoon module. Does that collide with other tools the user might have configured?
+- **Error messages**: actionable (do they tell the user what to do) or generic?
+- **Very short click (< 250ms)** cancels silently — good default.
+- **`README.md`**: complete? Does the troubleshooting cover the real-world cases?
 
-### 6. Operação / manutenção
+### 6. Operation / maintenance
 
-- **Versionamento**: sem `VERSION` file, sem tags semver (o workflow de release depende de tags `v*` — aparece mencionado no readme?).
-- **Backups de áudio** em `$PISPER_TMP/last.wav`: cresce sem limpeza, só é sobrescrito a cada uso. Em uso intenso `/tmp` pode encher — aceitável?
-- **Observabilidade**: `LOG_FILE="$PISPER_TMP/record.log"` é escrito mas ninguém consome. Rotação?
-- **install.sh idempotência**: marker-based injection evita dup. Uninstall não existe — plausível pra v1.
+- **Versioning**: no `VERSION` file. Tags follow semver (the release workflow keys off `v*` tags — is that mentioned in the README?).
+- **Audio backups** at `$PISPER_TMP/last.wav`: grows without cleanup, just overwritten on each use. Under heavy use, can `/tmp` fill up? Acceptable?
+- **Observability**: `LOG_FILE="$PISPER_TMP/record.log"` is written but nothing reads it. Is rotation a concern?
+- **install.sh idempotency**: marker-based injection avoids duplicates. No uninstall exists — acceptable for v1?
 
-## Formato da resposta
+## Response format
 
-- Liste findings ordenados por priority (1=HIGH primeiro).
-- Cada finding: `title`, `body` (explicação + sugestão concreta), `priority` (1-3), `confidence_score` (0.0-1.0), `code_location` (filepath + line range).
-- `overall_correctness`: "patch is correct" se o projeto está saudável pra shipping pessoal; "patch is incorrect" se há bug real ou vuln que precisa ser corrigido antes de usar.
-- `overall_explanation`: síntese — o estado geral do projeto, pontos fortes, preocupações principais.
-- `overall_confidence_score`: quão confiante você está no veredito.
+- List findings ordered by priority (1=HIGH first).
+- Each finding: `title`, `body` (explanation + concrete suggestion), `priority` (1-3), `confidence_score` (0.0-1.0), `code_location` (filepath + line range).
+- `overall_correctness`: "patch is correct" if the project is healthy enough to ship for personal daily use; "patch is incorrect" if there's a real bug or vuln that should be fixed before depending on it.
+- `overall_explanation`: summary — the overall state, strengths, main concerns.
+- `overall_confidence_score`: how confident you are in the verdict.
 
-## Regras
+## Rules
 
-- Só aponte findings acionáveis com sugestão concreta. Nada de "considere adicionar testes" genérico.
-- Cite arquivo + range de linhas em cada finding.
-- Este é um projeto **pessoal** — não compare com padrões enterprise (sem CI/CD complexo, sem monitoring, sem observability stack). Julgue pelo propósito: ferramenta de uso diário do autor.
-- Não sugira adicionar comentários, docstrings ou tipos a menos que algo esteja genuinamente confuso.
-- Não nitpick de estilo.
-- Se o projeto estiver bem, liste `findings: []` e explique no `overall_explanation`. **Não invente problemas.**
-- Responda em **português (Brasil)**.
+- Only actionable findings with concrete suggestions. No vague "consider adding tests".
+- Cite filepath + line range on every finding.
+- This is a **personal project** — don't compare it to enterprise baselines (no heavyweight CI/CD, no monitoring, no observability stack). Judge it by its purpose: a daily-use tool for the author.
+- Don't ask for comments, docstrings, or type annotations unless something is genuinely confusing.
+- Don't nitpick on style.
+- If the project is in good shape, return `findings: []` and explain in `overall_explanation`. **Don't invent problems.**
+- Respond in **English**.
