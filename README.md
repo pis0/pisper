@@ -1,8 +1,12 @@
 # pisper
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)]()
+[![GitHub stars](https://img.shields.io/github/stars/pis0/pisper?style=social)](https://github.com/pis0/pisper/stargazers)
+
 Global voice-to-text for **macOS**. Hold a key, speak, release — the transcribed text is pasted wherever your cursor is.
 
-Works in any app: terminals (Claude Code, Codex, Gemini CLI, iTerm2, Warp, Ghostty, JetBrains terminal), editors, browsers, WhatsApp Web, Slack, native prompts — if the app accepts `Cmd+V`, pisper pastes into it.
+**Works where paid alternatives don't** — especially in terminals (Claude Code, Codex, Gemini CLI, iTerm2, Warp, Ghostty, JetBrains), where most dictation tools fail or stutter. Also works everywhere else: editors, browsers, WhatsApp Web, Slack, native prompts. If the app accepts `Cmd+V`, pisper pastes into it.
 
 > **Status:** macOS only. Windows/Linux support is not implemented today. PRs welcome.
 
@@ -15,6 +19,17 @@ Paid tools like Wispr Flow solve this well, but:
 3. Many **don't work in terminals** (or work only with friction)
 
 pisper is the minimum that solves it: **global hold-to-talk**, your own API key, ~200 lines of shell and Lua, zero intermediate cloud other than OpenAI. For a developer who already juggles API keys and doesn't want another subscription, that's the right trade.
+
+### How it compares
+
+|                         | pisper                    | Wispr Flow             | Apple Dictation | Whisper web apps          |
+| ----------------------- | ------------------------- | ---------------------- | --------------- | ------------------------- |
+| Open source             | ✅ MIT                    | ❌                     | ❌              | varies                    |
+| Price                   | Your OpenAI usage (~$1/mo)| Subscription           | Free            | Subscription / per-request|
+| Works in terminals      | ✅                        | ⚠️ friction            | ⚠️ limited      | ❌ not system-wide         |
+| Stays on your machine   | ✅ (only OpenAI over HTTPS)| ❌ routes via vendor  | ✅              | ❌                        |
+| Your own API key        | ✅                        | ❌                     | —               | ❌                        |
+| Extra daemon            | None (uses Hammerspoon)   | Custom app             | System          | Custom app / browser      |
 
 ## How it works
 
@@ -311,15 +326,6 @@ pisper/
 - The last audio sent to the API is kept in `$TMPDIR/pisper/last.wav` for debugging — overwritten each session. If that bothers you, comment out the `cp "$AUDIO_FILE" "$PISPER_TMP/last.wav"` line in `bin/pisper-stop`.
 - The OpenAI auth header goes to curl via a `chmod 600` file (`-H "@file"`) so the token never reaches `argv`, where other local processes could read it with `ps`.
 - Your OpenAI key **never leaves your machine** except to go to OpenAI's endpoint over HTTPS. No proxy, no telemetry.
-
-## Roadmap
-
-- [ ] Windows (global hotkey + mic capture + paste) — likely AutoHotkey or a Rust/Go app
-- [ ] Linux (evdev + `parecord`/`arecord` + `xdotool`/`wtype`)
-- [ ] Native support for local Whisper (no API) via `whisper.cpp`
-- [ ] Optional LLM post-processing (clean up filler words, reformat for the target context)
-
-Contributions are welcome. Open an issue before tackling anything large so we can align on scope.
 
 ## License
 
