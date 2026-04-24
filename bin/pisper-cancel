@@ -51,8 +51,25 @@ process_pid_file() {
   kill_and_wait "$pid"
 }
 
+# Fallback pra achar ffmpeg pelo argv quando pid-file não está disponível.
+# Usado quando: (a) pid-file atrasou além do wait, (b) pisper-record crashou
+# entre spawn e publicação do pid-file, (c) cleanup geral capturou orfãos
+# sem pid-file. Match estrito por path exato evita matar ffmpegs alheios.
+kill_by_audio_path() {
+  local audio_path="$1"
+  while read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    local args
+    args=$(ps -p "$candidate" -o args= 2>/dev/null || echo "")
+    [[ "$args" == *ffmpeg* ]] || continue
+    [[ "$args" == *"$audio_path"* ]] || continue
+    kill_and_wait "$candidate"
+  done < <(pgrep -f "$audio_path" 2>/dev/null || true)
+}
+
 if [[ -n "$SESSION" ]]; then
   PID_FILE="$PISPER_TMP/ffmpeg-$SESSION.pid"
+  RAW_AUDIO="$PISPER_TMP/rec-$SESSION.wav"
   # Cancel pode rodar antes de pisper-record escrever o PID (hold ultra-curto).
   # pisper-record só publica o pid-file depois de validar ffmpeg + capturar
   # fingerprint (~200ms), então damos margem de 500ms.
@@ -61,7 +78,9 @@ if [[ -n "$SESSION" ]]; then
     sleep 0.05
   done
   process_pid_file "$PID_FILE"
-  rm -f "$PISPER_TMP/rec-$SESSION.wav" "$PISPER_TMP/rec-$SESSION.trimmed.wav"
+  # Belt-and-suspenders: se pid-file atrasou, ainda achamos o ffmpeg pelo argv.
+  kill_by_audio_path "$RAW_AUDIO"
+  rm -f "$RAW_AUDIO" "$PISPER_TMP/rec-$SESSION.trimmed.wav"
 else
   # Cleanup geral — usado no init() do Hammerspoon pra limpar órfãos de reload.
   # Fingerprint stale/reciclado → só remove o arquivo, nunca sinaliza PID alheio.
@@ -69,5 +88,14 @@ else
     [[ -e "$f" ]] || continue
     process_pid_file "$f"
   done
+  # Sweep de ffmpegs órfãos que perderam seu pid-file (crash entre spawn e
+  # publicação, ou pid-file removido sem o processo morrer junto).
+  while read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    args=$(ps -p "$candidate" -o args= 2>/dev/null || echo "")
+    [[ "$args" == *ffmpeg* ]] || continue
+    [[ "$args" == *"$PISPER_TMP/rec-"*.wav* ]] || continue
+    kill_and_wait "$candidate"
+  done < <(pgrep -f "$PISPER_TMP/rec-" 2>/dev/null || true)
   rm -f "$PISPER_TMP"/rec-*.wav "$PISPER_TMP"/rec-*.trimmed.wav
 fi

@@ -93,6 +93,12 @@ function M.stopRecording()
 
   alert("⏳ transcribing…", 0.5)
   runAsync(M.binPath .. "/pisper-stop", { sid }, function(exitCode, stdout, stderr)
+    -- Se uma nova sessão começou enquanto esta transcrição rodava, o alerta
+    -- daqui sobrescreveria o feedback visual da nova. Suprime o antigo — o
+    -- texto já foi colado pelo pisper-stop via pbcopy+Cmd+V de qualquer jeito.
+    if currentSession ~= nil and currentSession ~= sid then
+      return
+    end
     if exitCode == 0 then
       alert("✅", 0.3)
     else

@@ -61,6 +61,22 @@ if [[ -f "$PID_FILE" ]]; then
   fi
 fi
 
+# Fallback: pid-file atrasou além dos 500ms de espera (sistema sob carga) ou
+# pisper-record crashou antes de publicar. Sem isso, ffmpeg continuaria gravando
+# mic orfão. Localiza pelo argv — matching estrito pelo path exato do wav desta
+# sessão evita colisão com ffmpegs alheios.
+if [[ -z "$pid" ]]; then
+  while read -r candidate; do
+    [[ -n "$candidate" ]] || continue
+    args=$(ps -p "$candidate" -o args= 2>/dev/null || echo "")
+    [[ "$args" == *ffmpeg* ]] || continue
+    [[ "$args" == *"$RAW_AUDIO"* ]] || continue
+    pid="$candidate"
+    log_err "recovered ffmpeg via argv match (pid-file missing/stale)"
+    break
+  done < <(pgrep -f "$RAW_AUDIO" 2>/dev/null || true)
+fi
+
 if [[ -n "$pid" ]]; then
   kill -INT "$pid" 2>/dev/null || true
   for _ in 1 2 3 4 5 6 7 8 9 10; do
